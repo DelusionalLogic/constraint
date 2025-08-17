@@ -22,7 +22,7 @@ struct distance_params {
 	struct parameter *p2;
 };
 struct angle_params {
-	double distance;
+	double theta;
 
 	struct parameter *p11;
 	struct parameter *p12;
@@ -50,6 +50,8 @@ struct cdset {
 };
 
 struct caset {
+	double theta;
+
 	struct parameter *p11;
 	struct parameter *p12;
 
@@ -63,6 +65,27 @@ ssize_t find_param_in_cd(struct cdset *cd, struct parameter *param) {
 	}
 
 	return -1;
+}
+
+struct index_pair {
+	size_t a;
+	size_t b;
+};
+
+bool find_overlapping_point(struct cdset *cd1, struct cdset* cd2, struct index_pair *ret) {
+	for(size_t i = 0; i < cd1->num; i++) {
+		for(size_t j = 0; j < cd2->num; j++) {
+			if(cd1->p[i].param == cd2->p[j].param) {
+				if(ret != NULL) {
+					ret->a = i;
+					ret->b = j;
+				}
+				return true;
+			}
+		}
+	}
+
+	return false;
 }
 
 bool find_connecting_set(struct cdset cd[], size_t cd_count, size_t i, struct parameter *params, size_t *i_idx, size_t *i_rev, size_t *set1, size_t *set1_idx, size_t *set1_rev, size_t *set2, size_t *set2_idx, size_t *set2_rev) {
@@ -139,6 +162,47 @@ int main(int argc, char *argv[]) {
 				.p2 = &params[2],
 			},
 		},
+
+		{
+			.type = CONSTRAINT_DISTANCE,
+			.applied = false,
+			.distance = {
+				.distance = 10,
+				.p1 = &params[0],
+				.p2 = &params[3],
+			},
+		},
+		{
+			.type = CONSTRAINT_DISTANCE,
+			.applied = false,
+			.distance = {
+				.distance = 10,
+				.p1 = &params[1],
+				.p2 = &params[3],
+			},
+		},
+
+		{
+			.type = CONSTRAINT_DISTANCE,
+			.applied = false,
+			.distance = {
+				.distance = 10,
+				.p1 = &params[3],
+				.p2 = &params[4],
+			},
+		},
+
+		{
+			.type = CONSTRAINT_ANGLE,
+			.applied = false,
+			.angle = {
+				.theta = 0.3,
+				.p11 = &params[0],
+				.p12 = &params[1],
+				.p21 = &params[2],
+				.p22 = &params[4],
+			},
+		},
 	};
 
 	struct cdset cd[128] = {};
@@ -157,6 +221,7 @@ int main(int argc, char *argv[]) {
 			cd[cd_cur].p[cd[cd_cur].num++].pos[1] = 0.0;
 			cd_cur++;
 		} else if(c->type == CONSTRAINT_ANGLE) {
+			ca[ca_cur].theta = c->angle.theta;
 			ca[ca_cur].p11 = c->angle.p11;
 			ca[ca_cur].p12 = c->angle.p12;
 			ca[ca_cur].p21 = c->angle.p21;
@@ -189,7 +254,7 @@ int main(int argc, char *argv[]) {
 				double b_len = glm_vec2_norm(side_b);
 
 				vec2 side_c;
-				glm_vec2_sub(cd[set2].p[set2_rev].pos, cd[set2].p[set2_idx].pos, side_c);
+				glm_vec2_sub(cd[set2].p[set2_rev].pos, cd[set2].p[set2_idx].pos,side_c);
 				double c_len = glm_vec2_norm(side_c);
 
 				double b_theta = acos((pow(c_len, 2) + pow(a_len, 2) - pow(b_len, 2)) / (2 * c_len * a_len));
@@ -256,7 +321,102 @@ int main(int argc, char *argv[]) {
 		}
 
 		// Apply the DDA1 rule
-		for(size_t i = 0; i < ca_cur; i++) {
+		for(size_t i = 0; i < cd_cur; i++) {
+			for(size_t j = 0; j < ca_cur; j++) {
+				struct caset angle = ca[j];
+				
+				size_t found[4] = {0};
+				size_t matches = 0;
+				for(size_t k = 0; k < cd[i].num; k++) {
+					if(cd[i].p[k].param == angle.p11) {
+						assert(found[0] == 0);
+						found[0] = k+1;
+						matches++;
+					} else if(cd[i].p[k].param == angle.p12) {
+						assert(found[1] == 0);
+						found[1] = k+1;
+						matches++;
+					} else if(cd[i].p[k].param == angle.p21) {
+						assert(found[2] == 0);
+						found[2] = k+1;
+						matches++;
+					} else if(cd[i].p[k].param == angle.p22) {
+						assert(found[3] == 0);
+						found[3] = k+1;
+						matches++;
+					}
+				}
+
+				if(matches != 3) continue;
+
+				struct parameter **foreign = NULL;
+				size_t local_single;
+				if(found[0] == 0) {
+					foreign = &angle.p11;
+					local_single = found[1]-1;
+				}
+				if(found[1] == 0) {
+					foreign = &angle.p12;
+					local_single = found[0]-1;
+				}
+				if(found[2] == 0) {
+					foreign = &angle.p21;
+					local_single = found[3]-1;
+				}
+				if(found[3] == 0) {
+					foreign = &angle.p22;
+					local_single = found[2]-1;
+				}
+				if(foreign == NULL) continue;
+
+				for(size_t k = 0; k < cd_cur; k++) {
+					ssize_t foreign_i = find_param_in_cd(&cd[k], *foreign);
+					if(foreign_i < 0) continue;
+
+					struct index_pair overlap;
+					if(find_overlapping_point(&cd[i], &cd[k], &overlap)) {
+						vec2 xaxis = {1, 0};
+
+						vec2 local_segment;
+						if(found[0] != 0 && found[1] != 0) {
+							printf("Local_segment %d %d\n", found[0], found[1]);
+							glm_vec2_sub(cd[i].p[found[1]-1].pos, cd[i].p[found[0]-1].pos, local_segment);
+						} else {
+							printf("Local_segment %d %d\n", found[2], found[3]);
+							glm_vec2_sub(cd[i].p[found[3]-1].pos, cd[i].p[found[2]-1].pos, local_segment);
+						}
+						printf("Local_segment %f %f\n", local_segment[0], local_segment[1]);
+						glm_vec2_normalize(local_segment);
+						double theta_c = angle.theta - acos(glm_vec2_dot(local_segment, xaxis));
+
+						printf("single %d %d\n", local_single, overlap.a);
+						printf("single %d %d\n", cd[i].p[local_single].param - params, cd[i].p[overlap.a].param - params);
+						vec2 side_a;
+						glm_vec2_sub(cd[i].p[local_single].pos, cd[i].p[overlap.a].pos, side_a);
+						double a_len = glm_vec2_norm(side_a);
+
+						vec2 side_c;
+						glm_vec2_sub(cd[k].p[foreign_i].pos, cd[k].p[overlap.b].pos, side_c);
+						double c_len = glm_vec2_norm(side_c);
+
+						printf("xxx is %f %f\n", a_len, c_len);
+						double theta_b = M_PI - theta_c - asin(a_len / c_len * sin(theta_c));
+						printf("theta_b is %f\n", theta_b);
+
+						for(size_t l = 0; l < cd[k].num; l++) {
+							if(l == foreign_i) continue;
+
+							// @COMPL We need to calculate the positions here
+							cd[i].p[cd[i].num  ].pos[0] = 0;
+							cd[i].p[cd[i].num  ].pos[1] = 0;
+							cd[i].p[cd[i].num++].param = cd[k].p[j].param;
+						}
+
+						cd[k].num = 0;
+						exit(1);
+					}
+				}
+			}
 		}
 
 		for(size_t i = 0; i < cd_cur; i++) {
