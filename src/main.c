@@ -3,429 +3,475 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <cglm/cglm.h>
+#include <string.h>
 
-struct parameter {
-	double x;
-	double y;
-	bool fixed;
+enum operation {
+	CMD_ORIGIN,
+	CMD_CIRCLE_CENTER_RADIUS,
+	CMD_CIRCLE_CENTER_POINT,
+	CMD_LINE_POINT_ANGLE,
+	CMD_LINE_POINT_POINT,
+	CMD_POINT_CIRCLE_LINE,
+	CMD_POINT_CIRCLE_CIRCLE,
+	CMD_POINT_LINE_LINE,
 };
 
-enum constraint_type {
-	CONSTRAINT_DISTANCE,
-	CONSTRAINT_ANGLE,
-};
-
-struct distance_params {
-	double distance;
-
-	struct parameter *p1;
-	struct parameter *p2;
-};
-struct angle_params {
-	double theta;
-
-	struct parameter *p11;
-	struct parameter *p12;
-	struct parameter *p21;
-	struct parameter *p22;
-};
-struct constraint {
-	enum constraint_type type;
-	bool applied;
-
-	union {
-		struct distance_params distance;
-		struct angle_params angle;
-	};
-};
-
-struct placement {
-	struct parameter *param;
+struct point {
 	vec2 pos;
 };
 
-struct cdset {
-	struct placement p[16];
-	size_t num;
+struct circle {
+	vec2 center;
+	double radius;
 };
 
-struct caset {
-	double theta;
-
-	struct parameter *p11;
-	struct parameter *p12;
-
-	struct parameter *p21;
-	struct parameter *p22;
+struct line {
+	vec2 norm;
+	double C;
 };
 
-ssize_t find_param_in_cd(struct cdset *cd, struct parameter *param) {
-	for(size_t i = 0; i < cd->num; i++) {
-		if(cd->p[i].param == param) return i;
-	}
+struct command {
+	enum operation op;
+	uint8_t root;
+	bool hidden;
 
-	return -1;
-}
+	union {
+		struct command *as_cmd;
+		double as_input;
+	} arg1;
 
-struct index_pair {
-	size_t a;
-	size_t b;
+	union {
+		struct command *as_cmd;
+		double as_input;
+	} arg2;
+
+	union {
+		struct circle circle;
+		struct point point;
+		struct line line;
+	};
+
+	struct command *next;
 };
 
-bool find_overlapping_point(struct cdset *cd1, struct cdset* cd2, struct index_pair *ret) {
-	for(size_t i = 0; i < cd1->num; i++) {
-		for(size_t j = 0; j < cd2->num; j++) {
-			if(cd1->p[i].param == cd2->p[j].param) {
-				if(ret != NULL) {
-					ret->a = i;
-					ret->b = j;
-				}
-				return true;
-			}
+void circle_line_intersect(struct circle circle, struct line line, uint8_t root, struct point *point) {
+	double a = line.norm[0];
+	double b = line.norm[1];
+	double c = line.C + glm_vec2_dot(line.norm, circle.center);
+
+	double rec = pow(a, 2) + pow(b, 2);
+	double x0 = -a*c / rec;
+	double y0 = -b*c / rec;
+
+	double r2 = pow(circle.radius, 2); 
+	double test = r2 * rec; 
+	if(pow(c, 2.0) - test > DBL_EPSILON * 1e14) {
+		printf("Expected an intersection between circle and line\n");
+		assert(false);
+	} else if(fabs(pow(c, 2) - test) < DBL_EPSILON * 1e14) {
+		point->pos[0] = x0;
+		point->pos[1] = y0;
+	} else {
+		double d = r2 - pow(c, 2)/rec;
+		double mult = sqrt(d / rec);
+
+		if(root == 0) {
+			point->pos[0] = x0 + b * mult;
+			point->pos[1] = y0 - a * mult;
+		} else {
+			point->pos[0] = x0 - b * mult;
+			point->pos[1] = y0 + a * mult;
 		}
 	}
 
-	return false;
+	glm_vec2_add(point->pos, circle.center, point->pos);
 }
 
-bool find_connecting_set(struct cdset cd[], size_t cd_count, size_t i, struct parameter *params, size_t *i_idx, size_t *i_rev, size_t *set1, size_t *set1_idx, size_t *set1_rev, size_t *set2, size_t *set2_idx, size_t *set2_rev) {
-	struct cdset *base_cd = &cd[i];
+void plot_point(struct point p) {
+	printf("<circle cx=\"%f\" cy=\"%f\" r=\".4\" fill=\"black\" />\n", p.pos[0], -p.pos[1]);
+}
 
-	size_t first_seen[10] = {};
-	size_t first_seen_idx[10] = {};
-	size_t first_seen_shd[10] = {};
-	size_t first_seen_i[10] = {};
+void plot_line_between(struct point p1, struct point p2) {
+	printf("<line x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\" stroke=\"black\" stroke-width=\".2\" />\n", p1.pos[0], -p1.pos[1], p2.pos[0], -p2.pos[1]);
+}
 
-	for(size_t j = 0; j < base_cd->num; j++) {
-		for(size_t k = i+1; k < cd_count; k++) {
-			struct cdset *candidate = &cd[k];
+void plot_line(struct line l) {
+	double minx = -50;
+	double maxx =  50;
 
-			ssize_t contained = find_param_in_cd(candidate, base_cd->p[j].param);
+	double miny = -(l.norm[0] * minx + l.C) / l.norm[1];
+	double maxy = -(l.norm[0] * maxx + l.C) / l.norm[1];
 
-			if(contained >= 0) {
-				for(size_t w = 0; w < candidate->num; w++) {
-					if(contained == w) continue;
+	printf("<line x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\" stroke=\"black\" stroke-width=\".2\" />\n", minx, -miny, maxx, -maxy);
+}
 
-					size_t candidate_param_idx = candidate->p[w].param - params;
-					if(first_seen[candidate_param_idx] != 0) {
-						*i_rev = j;
-						*i_idx = first_seen_i[candidate_param_idx];
-						*set1 = first_seen[candidate_param_idx];
-						*set1_idx = first_seen_shd[candidate_param_idx];
-						*set1_rev = first_seen_idx[candidate_param_idx];
-						*set2 = k;
-						*set2_idx = contained;
-						*set2_rev = w;
-						return true;
-					}
+void plot_arc_between(double r, struct point p1, struct point p2) {
+	printf("<path d=\"M %f %f A %f %f 0 0 0 %f %f\" stroke=\"black\" stroke-width=\".2\" fill=\"none\" />\n", p1.pos[0], -p1.pos[1], r, r, p2.pos[0], -p2.pos[1]);
+}
 
-					first_seen[candidate_param_idx] = k;
-					first_seen_shd[candidate_param_idx] = contained;
-					first_seen_idx[candidate_param_idx] = w;
-					first_seen_i[candidate_param_idx] = j;
-				}
-			}
-		}
-	}
+void plot_circle(struct circle c) {
+	printf("<circle cx=\"%f\" cy=\"%f\" r=\"%f\" fill=\"none\" stroke=\"black\" stroke-width=\".1\" />\n", c.center[0], -c.center[1], c.radius);
+}
 
-	return false;
+struct command* insert_cmd(struct command **cmds, struct command cmd) {
+	struct command *new = calloc(sizeof(struct command), 1);
+	memcpy(new, &cmd, sizeof(struct command));
+	assert(new != NULL);
+
+	if(*cmds != NULL) (*cmds)->next = new;
+	*cmds = new;
+
+	return new;
+}
+
+struct command *create_perp(struct command **cmds, struct command *l, struct command *p) {
+	struct command *c1 = insert_cmd(cmds, (struct command){
+		.op = CMD_CIRCLE_CENTER_RADIUS,
+		.hidden = true,
+		.arg1.as_cmd = p,
+		.arg2.as_input = 5, // Not actually input, just a random number
+	});
+	struct command *p1 = insert_cmd(cmds, (struct command){
+		.op = CMD_POINT_CIRCLE_LINE,
+		.hidden = true,
+		.root = 0,
+		.arg1.as_cmd = c1,
+		.arg2.as_cmd = l,
+	});
+	struct command *p2 = insert_cmd(cmds, (struct command){
+		.op = CMD_POINT_CIRCLE_LINE,
+		.hidden = true,
+		.root = 1,
+		.arg1.as_cmd = c1,
+		.arg2.as_cmd = l,
+	});
+
+	struct command *c2 = insert_cmd(cmds, (struct command){
+		.op = CMD_CIRCLE_CENTER_POINT,
+		.hidden = true,
+		.arg1.as_cmd = p2,
+		.arg2.as_cmd = p1,
+	});
+	struct command *c3 = insert_cmd(cmds, (struct command){
+		.op = CMD_CIRCLE_CENTER_POINT,
+		.hidden = true,
+		.arg1.as_cmd = p1,
+		.arg2.as_cmd = p2,
+	});
+
+	struct command *perp1 = insert_cmd(cmds, (struct command){
+		.op = CMD_POINT_CIRCLE_CIRCLE,
+		.hidden = true,
+		.arg1.as_cmd = c2,
+		.arg2.as_cmd = c3,
+	});
+	struct command *perp2 = insert_cmd(cmds, (struct command){
+		.op = CMD_POINT_CIRCLE_CIRCLE,
+		.hidden = true,
+		.root = 1,
+		.arg1.as_cmd = c2,
+		.arg2.as_cmd = c3,
+	});
+
+	return insert_cmd(cmds, (struct command){
+		.op = CMD_LINE_POINT_POINT,
+		.hidden = true,
+		.arg1.as_cmd = perp1,
+		.arg2.as_cmd = perp2,
+	});
 }
 
 int main(int argc, char *argv[]) {
-	struct parameter params[10] = {};
 
-	struct constraint constraints[] = {
-		{
-			.type = CONSTRAINT_DISTANCE,
-			.applied = false,
-			.distance = {
-				.distance = 10,
-				.p1 = &params[0],
-				.p2 = &params[1],
-			},
-		},
-		{
-			.type = CONSTRAINT_DISTANCE,
-			.applied = false,
-			.distance = {
-				.distance = 10,
-				.p1 = &params[1],
-				.p2 = &params[2],
-			},
-		},
-		{
-			.type = CONSTRAINT_DISTANCE,
-			.applied = false,
-			.distance = {
-				.distance = 10,
-				.p1 = &params[0],
-				.p2 = &params[2],
-			},
-		},
+	struct command *root = NULL;
+	struct command *next = NULL;
+	root = insert_cmd(&next, (struct command){
+		.op = CMD_ORIGIN,
+	});
 
-		{
-			.type = CONSTRAINT_DISTANCE,
-			.applied = false,
-			.distance = {
-				.distance = 10,
-				.p1 = &params[0],
-				.p2 = &params[3],
-			},
-		},
-		{
-			.type = CONSTRAINT_DISTANCE,
-			.applied = false,
-			.distance = {
-				.distance = 10,
-				.p1 = &params[1],
-				.p2 = &params[3],
-			},
-		},
+	struct command *p2;
+	{
+		struct command *circle = insert_cmd(&next, (struct command){
+			.op = CMD_CIRCLE_CENTER_RADIUS,
+			.hidden = true,
+			.arg1.as_cmd = root,
+			.arg2.as_input = 20,
+		});
+		struct command *line = insert_cmd(&next, (struct command){
+			.op = CMD_LINE_POINT_ANGLE,
+			.hidden = true,
+			.arg1.as_cmd = root,
+			.arg2.as_input = M_PI*0.66666,
+		});
+		p2 = insert_cmd(&next, (struct command){
+			.op = CMD_POINT_CIRCLE_LINE,
+			.arg1.as_cmd = circle,
+			.arg2.as_cmd = line,
+		});
+	}
 
+	struct command *p3;
+	{
+		struct command *c1 = insert_cmd(&next, (struct command){
+			.op = CMD_CIRCLE_CENTER_RADIUS,
+			.hidden = true,
+			.arg1.as_cmd = root,
+			.arg2.as_input = 20,
+		});
+		struct command *c2 = insert_cmd(&next, (struct command){
+			.op = CMD_CIRCLE_CENTER_RADIUS,
+			.hidden = true,
+			.arg1.as_cmd = p2,
+			.arg2.as_input = 20,
+		});
+		p3 = insert_cmd(&next, (struct command){
+			.op = CMD_POINT_CIRCLE_CIRCLE,
+			.arg1.as_cmd = c1,
+			.arg2.as_cmd = c2,
+		});
+	}
+
+	struct command *round_start;
+	struct command *round_end;
+	{
+		struct command *l1 = insert_cmd(&next, (struct command){
+			.op = CMD_LINE_POINT_POINT,
+			.hidden = true,
+			.arg1.as_cmd = root,
+			.arg2.as_cmd = p2,
+		});
+		struct command *l2 = insert_cmd(&next, (struct command){
+			.op = CMD_LINE_POINT_POINT,
+			.hidden = true,
+			.arg1.as_cmd = p2,
+			.arg2.as_cmd = p3,
+		});
+
+		struct command *l1_parallel;
 		{
-			.type = CONSTRAINT_DISTANCE,
-			.applied = false,
-			.distance = {
-				.distance = 10,
-				.p1 = &params[3],
-				.p2 = &params[4],
-			},
-		},
+			struct command *perp = create_perp(&next, l1, p2);
+			struct command *c = insert_cmd(&next, (struct command){
+				.op = CMD_CIRCLE_CENTER_RADIUS,
+				.hidden = true,
+				.arg1.as_cmd = p2,
+				.arg2.as_input = 4,
+			});
 
+			struct command *d = insert_cmd(&next, (struct command){
+				.op = CMD_POINT_CIRCLE_LINE,
+				.hidden = true,
+				.root = 1,
+				.arg1.as_cmd = c,
+				.arg2.as_cmd = perp,
+			});
+
+			l1_parallel = create_perp(&next, perp, d);
+		}
+
+		struct command *l2_parallel;
 		{
-			.type = CONSTRAINT_ANGLE,
-			.applied = false,
-			.angle = {
-				.theta = 0.3,
-				.p11 = &params[0],
-				.p12 = &params[1],
-				.p21 = &params[2],
-				.p22 = &params[4],
-			},
-		},
-	};
+			struct command *perp = create_perp(&next, l2, p2);
+			struct command *c = insert_cmd(&next, (struct command){
+				.op = CMD_CIRCLE_CENTER_RADIUS,
+				.hidden = true,
+				.arg1.as_cmd = p2,
+				.arg2.as_input = 4,
+			});
 
-	struct cdset cd[128] = {};
-	size_t cd_cur = 0;
-	struct caset ca[128] = {};
-	size_t ca_cur = 0;
+			struct command *d = insert_cmd(&next, (struct command){
+				.op = CMD_POINT_CIRCLE_LINE,
+				.hidden = true,
+				.root = 1,
+				.arg1.as_cmd = c,
+				.arg2.as_cmd = perp,
+			});
 
-	for(size_t i = 0; i < sizeof(constraints)/sizeof(constraints[0]); i++) {
-		struct constraint *c = &constraints[i];
-		if(c->type == CONSTRAINT_DISTANCE) {
-			cd[cd_cur].p[cd[cd_cur].num  ].param = c->distance.p1;
-			cd[cd_cur].p[cd[cd_cur].num  ].pos[0] = 0.0;
-			cd[cd_cur].p[cd[cd_cur].num++].pos[1] = 0.0;
-			cd[cd_cur].p[cd[cd_cur].num  ].param = c->distance.p2;
-			cd[cd_cur].p[cd[cd_cur].num  ].pos[0] = c->distance.distance;
-			cd[cd_cur].p[cd[cd_cur].num++].pos[1] = 0.0;
-			cd_cur++;
-		} else if(c->type == CONSTRAINT_ANGLE) {
-			ca[ca_cur].theta = c->angle.theta;
-			ca[ca_cur].p11 = c->angle.p11;
-			ca[ca_cur].p12 = c->angle.p12;
-			ca[ca_cur].p21 = c->angle.p21;
-			ca[ca_cur].p22 = c->angle.p22;
-			ca_cur++;
+			l2_parallel = create_perp(&next, perp, d);
+		}
+
+		struct command *rounding_center = insert_cmd(&next, (struct command){
+			.op = CMD_POINT_LINE_LINE,
+			.hidden = true,
+			.arg1.as_cmd = l1_parallel,
+			.arg2.as_cmd = l2_parallel,
+		});
+
+		struct command *rounding_circle = insert_cmd(&next, (struct command){
+			.op = CMD_CIRCLE_CENTER_RADIUS,
+			.hidden = true,
+			.arg1.as_cmd = rounding_center,
+			.arg2.as_input = 4,
+		});
+
+		round_start = insert_cmd(&next, (struct command){
+			.op = CMD_POINT_CIRCLE_LINE,
+			.hidden = true,
+			.arg1.as_cmd = rounding_circle,
+			.arg2.as_cmd = l1,
+		});
+		round_end = insert_cmd(&next, (struct command){
+			.op = CMD_POINT_CIRCLE_LINE,
+			.hidden = true,
+			.arg1.as_cmd = rounding_circle,
+			.arg2.as_cmd = l2,
+		});
+
+		// insert_cmd(&next, (struct command){
+		// 	.op = CMD_CIRCLE_CENTER_POINT,
+		// 	.arg1.as_cmd = rounding_center,
+		// 	.arg2.as_cmd = p2,
+		// });
+	}
+
+		// {
+		// 	.op = CMD_POINT_CIRCLE_LINE,
+		// 	.root = 1,
+		// 	.arg1.as_cmd = &cmd[7],
+		// 	.arg2.as_cmd = &cmd[2],
+		// },
+		// {
+		// 	.op = CMD_LINE_POINT_POINT,
+		// 	.arg1.as_cmd = &cmd[3],
+		// 	.arg2.as_cmd = &cmd[6],
+		// },
+		// {
+		// 	.op = CMD_POINT_CIRCLE_LINE,
+		// 	.hidden = true,
+		// 	.root = 1,
+		// 	.arg1.as_cmd = &cmd[7],
+		// 	.arg2.as_cmd = &cmd[9],
+		// },
+		// {
+		// 	.op = CMD_CIRCLE_CENTER_POINT,
+		// 	.hidden = true,
+		// 	.arg1.as_cmd = &cmd[8],
+		// 	.arg2.as_cmd = &cmd[3],
+		// },
+		// {
+		// 	.op = CMD_POINT_CIRCLE_LINE,
+		// 	.hidden = true,
+		// 	.root = 1,
+		// 	.arg1.as_cmd = &cmd[11],
+		// 	.arg2.as_cmd = &cmd[2],
+		// },
+		// {
+		// 	.op = CMD_CIRCLE_CENTER_POINT,
+		// 	.arg1.as_cmd = &cmd[12],
+		// 	.arg2.as_cmd = &cmd[3],
+		// },
+		// {
+		// 	.op = CMD_CIRCLE_CENTER_POINT,
+		// 	.arg1.as_cmd = &cmd[3],
+		// 	.arg2.as_cmd = &cmd[12],
+		// },
+		// {
+		// 	.op = CMD_POINT_CIRCLE_CIRCLE,
+		// 	.arg1.as_cmd = &cmd[13],
+		// 	.arg2.as_cmd = &cmd[14],
+		// },
+		// {
+		// 	.op = CMD_POINT_CIRCLE_CIRCLE,
+		// 	.root = 1,
+		// 	.arg1.as_cmd = &cmd[13],
+		// 	.arg2.as_cmd = &cmd[14],
+		// },
+		// {
+		// 	.op = CMD_LINE_POINT_POINT,
+		// 	.root = 1,
+		// 	.arg1.as_cmd = &cmd[15],
+		// 	.arg2.as_cmd = &cmd[16],
+		// },
+	// };
+
+	for(struct command *current = root; current != NULL; current = current->next) {
+		switch(current->op) {
+			case CMD_ORIGIN: {
+				glm_vec2_zero(current->point.pos);
+			}break;
+			case CMD_CIRCLE_CENTER_RADIUS: {
+				glm_vec2_copy(current->arg1.as_cmd->point.pos, current->circle.center);
+				current->circle.radius = current->arg2.as_input;
+			}break;
+			case CMD_LINE_POINT_ANGLE: {
+				double theta = current->arg2.as_input;
+				current->line.norm[0] = -sin(theta);
+				current->line.norm[1] = cos(theta);
+				vec2 offset = {-current->arg1.as_cmd->point.pos[0], -current->arg1.as_cmd->point.pos[1]};
+				current->line.C = glm_vec2_dot(current->line.norm, offset);
+			}break;
+			case CMD_LINE_POINT_POINT: {
+				current->line.norm[0] = current->arg2.as_cmd->point.pos[1] - current->arg1.as_cmd->point.pos[1];
+				current->line.norm[1] = current->arg1.as_cmd->point.pos[0] - current->arg2.as_cmd->point.pos[0];
+				current->line.C = current->arg1.as_cmd->point.pos[1] * -current->line.norm[1] - current->line.norm[0] * current->arg1.as_cmd->point.pos[0];
+			}break;
+			case CMD_POINT_CIRCLE_LINE: {
+				circle_line_intersect(current->arg1.as_cmd->circle, current->arg2.as_cmd->line, current->root, &current->point);
+			}break;
+			case CMD_POINT_CIRCLE_CIRCLE: {
+				vec2 between_centers;
+				glm_vec2_sub(current->arg1.as_cmd->circle.center, current->arg2.as_cmd->circle.center, between_centers);
+				glm_vec2_mul(between_centers, (vec2){2, 2}, between_centers);
+				double a = between_centers[0];
+				double b = between_centers[1];
+
+				double c = (pow(current->arg2.as_cmd->circle.center[0], 2) - pow(current->arg1.as_cmd->circle.center[0], 2)) + \
+						(pow(current->arg2.as_cmd->circle.center[1], 2) - pow(current->arg1.as_cmd->circle.center[1], 2)) - \
+						(pow(current->arg2.as_cmd->circle.radius, 2) - pow(current->arg1.as_cmd->circle.radius, 2));
+
+				struct line radical_axis = { {a, b}, c };
+				circle_line_intersect(current->arg1.as_cmd->circle, radical_axis, current->root, &current->point);
+			}break;
+			case CMD_POINT_LINE_LINE: {
+				double a1 = current->arg1.as_cmd->line.norm[0];
+				double b1 = current->arg1.as_cmd->line.norm[1];
+				double c1 = current->arg1.as_cmd->line.C;
+
+				double a2 = current->arg2.as_cmd->line.norm[0];
+				double b2 = current->arg2.as_cmd->line.norm[1];
+				double c2 = current->arg2.as_cmd->line.C;
+
+				current->point.pos[0] = -(c1*b2 - c2*b1) / (a1*b2 - a2*b1);
+				current->point.pos[1] = -(a1*c2 - a2*c1) / (a1*b2 - a2*b1);
+			}break;
+			case CMD_CIRCLE_CENTER_POINT: {
+				glm_vec2_copy(current->arg1.as_cmd->point.pos, current->circle.center);
+				vec2 imm;
+				glm_vec2_sub(current->arg1.as_cmd->point.pos, current->arg2.as_cmd->point.pos, imm);
+				current->circle.radius = glm_vec2_norm(imm);
+			}break;
+
+		}
+		// printf("%fx + %fy + %f = 0\n", cmd[2].line.norm[0], cmd[2].line.norm[1], cmd[2].line.C);
+	}
+	printf("<svg version=\"1.1\" viewBox=\"-50 -50 100 100\" width=\"1200\" height=\"1200\" xmlns=\"http://www.w3.org/2000/svg\">\n");
+	printf("<line x1=\"-1000\" y1=\"0\" x2=\"1000\" y2=\"0\" stroke=\"black\" stroke-width=\".1\" />\n");
+	printf("<line y1=\"-1000\" x1=\"0\" y2=\"1000\" x2=\"0\" stroke=\"black\" stroke-width=\".1\" />\n");
+
+	for(struct command *current = root; current != NULL; current = current->next) {
+		if(current->hidden) continue;
+		switch(current->op) {
+			case CMD_ORIGIN:
+			case CMD_POINT_CIRCLE_LINE:
+			case CMD_POINT_CIRCLE_CIRCLE:
+			case CMD_POINT_LINE_LINE:
+				plot_point(current->point);
+				break;
+			case CMD_CIRCLE_CENTER_RADIUS:
+			case CMD_CIRCLE_CENTER_POINT:
+				plot_circle(current->circle);
+				break;
+			case CMD_LINE_POINT_ANGLE:
+			case CMD_LINE_POINT_POINT:
+				plot_line(current->line);
+				break;
 		}
 	}
 
-	while(true) {
-		for(size_t i = 0; i < cd_cur; i++) {
-			struct cdset *cur = &cd[i];
+	plot_line_between(root->point, round_start->point);
+	plot_line_between(round_end->point, p3->point);
+	plot_line_between(p3->point, root->point);
 
-			size_t i_idx;
-			size_t i_rev;
-			size_t set1;
-			size_t set1_idx;
-			size_t set1_rev;
-			size_t set2;
-			size_t set2_idx;
-			size_t set2_rev;
-			if(find_connecting_set(cd, cd_cur, i, params, &i_idx, &i_rev, &set1, &set1_idx, &set1_rev, &set2, &set2_idx, &set2_rev)) {
-				// Find the parameters of the triangle the three sides have to
-				// construct
-				vec2 side_a;
-				glm_vec2_sub(cur->p[i_rev].pos, cur->p[i_idx].pos, side_a);
-				double a_len = glm_vec2_norm(side_a);
+	plot_arc_between(4, round_start->point, round_end->point);
 
-				vec2 side_b;
-				glm_vec2_sub(cd[set1].p[set1_rev].pos, cd[set1].p[set1_idx].pos, side_b);
-				double b_len = glm_vec2_norm(side_b);
-
-				vec2 side_c;
-				glm_vec2_sub(cd[set2].p[set2_rev].pos, cd[set2].p[set2_idx].pos,side_c);
-				double c_len = glm_vec2_norm(side_c);
-
-				double b_theta = acos((pow(c_len, 2) + pow(a_len, 2) - pow(b_len, 2)) / (2 * c_len * a_len));
-				double c_theta = acos((pow(a_len, 2) + pow(b_len, 2) - pow(c_len, 2)) / (2 * a_len * b_len));
-
-				// Build the transform matrix for set1 and set2, we don't touch
-				// cur since we let that be the reference
-				// Merge set1 and set2 into cur
-
-				{
-					mat3 b_transform;
-					{
-						vec2 scratch;
-						glm_mat3_identity(b_transform);
-						glm_translate2d(b_transform, cur->p[i_idx].pos);
-						glm_rotate2d(b_transform, acos(glm_vec2_dot(side_b, side_a) / (b_len * a_len)) + c_theta);
-						glm_vec2_negate_to(cd[set1].p[set1_idx].pos, scratch);
-						glm_translate2d(b_transform, scratch);
-					}
-
-					vec3 scratch;
-					scratch[2] = 1;
-					for(size_t j = 0; j < cd[set1].num; j++) {
-						if(j == set1_idx) continue;
-
-						scratch[0] = cd[set1].p[j].pos[0];
-						scratch[1] = cd[set1].p[j].pos[1];
-						glm_mat3_mulv(b_transform, scratch, scratch);
-
-						cur->p[cur->num  ].pos[0] = scratch[0];
-						cur->p[cur->num  ].pos[1] = scratch[1];
-						cur->p[cur->num++].param = cd[set1].p[j].param;
-					}
-					cd[set1].num = 0;
-				}
-
-				{
-					mat3 c_transform;
-					{
-						vec2 scratch;
-						glm_mat3_identity(c_transform);
-						glm_translate2d(c_transform, cur->p[i_rev].pos);
-						glm_rotate2d(c_transform, acos(glm_vec2_dot(side_c, side_a) / (c_len * a_len)) - b_theta);
-						glm_vec2_negate_to(cd[set2].p[set2_rev].pos, scratch);
-						glm_translate2d(c_transform, scratch);
-					}
-
-					vec3 scratch;
-					scratch[2] = 1;
-					for(size_t j = 0; j < cd[set2].num; j++) {
-						if(j == set2_idx || j == set2_rev) continue;
-
-						scratch[0] = cd[set2].p[j].pos[0];
-						scratch[1] = cd[set2].p[j].pos[1];
-						glm_mat3_mulv(c_transform, scratch, scratch);
-
-						cur->p[cur->num  ].pos[0] = scratch[0];
-						cur->p[cur->num  ].pos[1] = scratch[1];
-						cur->p[cur->num++].param = cd[set2].p[j].param;
-					}
-					cd[set2].num = 0;
-				}
-			}
-		}
-
-		// Apply the DDA1 rule
-		for(size_t i = 0; i < cd_cur; i++) {
-			for(size_t j = 0; j < ca_cur; j++) {
-				struct caset angle = ca[j];
-				
-				size_t found[4] = {0};
-				size_t matches = 0;
-				for(size_t k = 0; k < cd[i].num; k++) {
-					if(cd[i].p[k].param == angle.p11) {
-						assert(found[0] == 0);
-						found[0] = k+1;
-						matches++;
-					} else if(cd[i].p[k].param == angle.p12) {
-						assert(found[1] == 0);
-						found[1] = k+1;
-						matches++;
-					} else if(cd[i].p[k].param == angle.p21) {
-						assert(found[2] == 0);
-						found[2] = k+1;
-						matches++;
-					} else if(cd[i].p[k].param == angle.p22) {
-						assert(found[3] == 0);
-						found[3] = k+1;
-						matches++;
-					}
-				}
-
-				if(matches != 3) continue;
-
-				struct parameter **foreign = NULL;
-				size_t local_single;
-				if(found[0] == 0) {
-					foreign = &angle.p11;
-					local_single = found[1]-1;
-				}
-				if(found[1] == 0) {
-					foreign = &angle.p12;
-					local_single = found[0]-1;
-				}
-				if(found[2] == 0) {
-					foreign = &angle.p21;
-					local_single = found[3]-1;
-				}
-				if(found[3] == 0) {
-					foreign = &angle.p22;
-					local_single = found[2]-1;
-				}
-				if(foreign == NULL) continue;
-
-				for(size_t k = 0; k < cd_cur; k++) {
-					ssize_t foreign_i = find_param_in_cd(&cd[k], *foreign);
-					if(foreign_i < 0) continue;
-
-					struct index_pair overlap;
-					if(find_overlapping_point(&cd[i], &cd[k], &overlap)) {
-						vec2 xaxis = {1, 0};
-
-						vec2 local_segment;
-						if(found[0] != 0 && found[1] != 0) {
-							printf("Local_segment %d %d\n", found[0], found[1]);
-							glm_vec2_sub(cd[i].p[found[1]-1].pos, cd[i].p[found[0]-1].pos, local_segment);
-						} else {
-							printf("Local_segment %d %d\n", found[2], found[3]);
-							glm_vec2_sub(cd[i].p[found[3]-1].pos, cd[i].p[found[2]-1].pos, local_segment);
-						}
-						printf("Local_segment %f %f\n", local_segment[0], local_segment[1]);
-						glm_vec2_normalize(local_segment);
-						double theta_c = angle.theta - acos(glm_vec2_dot(local_segment, xaxis));
-
-						printf("single %d %d\n", local_single, overlap.a);
-						printf("single %d %d\n", cd[i].p[local_single].param - params, cd[i].p[overlap.a].param - params);
-						vec2 side_a;
-						glm_vec2_sub(cd[i].p[local_single].pos, cd[i].p[overlap.a].pos, side_a);
-						double a_len = glm_vec2_norm(side_a);
-
-						vec2 side_c;
-						glm_vec2_sub(cd[k].p[foreign_i].pos, cd[k].p[overlap.b].pos, side_c);
-						double c_len = glm_vec2_norm(side_c);
-
-						printf("xxx is %f %f\n", a_len, c_len);
-						double theta_b = M_PI - theta_c - asin(a_len / c_len * sin(theta_c));
-						printf("theta_b is %f\n", theta_b);
-
-						for(size_t l = 0; l < cd[k].num; l++) {
-							if(l == foreign_i) continue;
-
-							// @COMPL We need to calculate the positions here
-							cd[i].p[cd[i].num  ].pos[0] = 0;
-							cd[i].p[cd[i].num  ].pos[1] = 0;
-							cd[i].p[cd[i].num++].param = cd[k].p[j].param;
-						}
-
-						cd[k].num = 0;
-						exit(1);
-					}
-				}
-			}
-		}
-
-		for(size_t i = 0; i < cd_cur; i++) {
-			printf("CD %d\n", i);
-			for(size_t j = 0; j < cd[i].num; j++) {
-				printf("p %d %f;%f\n", j, cd[i].p[j].pos[0], cd[i].p[j].pos[1]);
-			}
-		}
-	}
-
-	printf("%ld\n", cd_cur);
+	printf("</svg>\n");
 }
