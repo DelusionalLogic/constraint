@@ -159,7 +159,7 @@ struct element* insert_cmd(struct drawing *drawing, struct command cmd) {
 struct element *create_perp(struct drawing *cmds, struct element *l, struct element *p, bool hide) {
 	static struct element radius = {
 		.type = ETYPE_VALUE,
-		.value = 5, // Just a random number
+		.value = 5, // Just an arbitrary number
 	};
 
 	struct element *c1 = insert_cmd(cmds, (struct command){
@@ -433,56 +433,49 @@ void execute_drawing(struct drawing *drawing, double inputs[]) {
 	}
 }
 
-int main(int argc, char *argv[]) {
-	struct element *line_start;
-	struct element *line_bend_start;
-	struct element *line_ctr;
-	struct element *line_bend_end;
-	struct element *line_end;
-
-	struct drawing drawing = {};
-	line_start = insert_cmd(&drawing, (struct command){
+void create_drawing(struct drawing* drawing, struct element **line_start, struct element **line_bend_start, struct element **line_ctr, struct element **line_bend_end, struct element **line_end) {
+	*line_start = insert_cmd(drawing, (struct command){
 		.op = CMD_ORIGIN,
 		.hidden = true,
 		.result.type = ETYPE_POINT,
 	});
 
-	struct element *element_spacing = insert_cmd(&drawing, (struct command){
+	struct element *element_spacing = insert_cmd(drawing, (struct command){
 		.op = CMD_VALUE_INPUT,
 		.result.type = ETYPE_VALUE,
 	});
 
 	struct element *line_corner;
 	{
-		struct element *xaxis = insert_cmd(&drawing, (struct command){
+		struct element *xaxis = insert_cmd(drawing, (struct command){
 			.op = CMD_LINE_X,
 			.hidden = true,
 			.result.type = ETYPE_LINE,
 		});
 
-		struct element *root_angle = insert_cmd(&drawing, (struct command){
+		struct element *root_angle = insert_cmd(drawing, (struct command){
 			.op = CMD_VALUE_INPUT,
 			.result.type = ETYPE_VALUE,
 		});
 
-		struct element *l = insert_cmd(&drawing, (struct command){
+		struct element *l = insert_cmd(drawing, (struct command){
 			.op = CMD_LINE_POINT_LINE_ANGLE,
 			.hidden = true,
 			.result.type = ETYPE_LINE,
-			.arg1 = line_start,
+			.arg1 = *line_start,
 			.arg2 = xaxis,
 			.arg3 = root_angle,
 		});
 
-		struct element *c = insert_cmd(&drawing, (struct command){
+		struct element *c = insert_cmd(drawing, (struct command){
 			.op = CMD_CIRCLE_CENTER_RADIUS,
 			.hidden = true,
 			.result.type = ETYPE_CIRCLE,
-			.arg1 = line_start,
+			.arg1 = *line_start,
 			.arg2 = element_spacing,
 		});
 
-		struct element *p = insert_cmd(&drawing, (struct command){
+		struct element *p = insert_cmd(drawing, (struct command){
 			.op = CMD_POINT_CIRCLE_LINE,
 			.hidden = true,
 			.result.type = ETYPE_POINT,
@@ -493,21 +486,21 @@ int main(int argc, char *argv[]) {
 	}
 
 	{
-		struct element *li = insert_cmd(&drawing, (struct command){
+		struct element *li = insert_cmd(drawing, (struct command){
 			.op = CMD_LINE_POINT_POINT,
 			.hidden = true,
 			.result.type = ETYPE_LINE,
-			.arg1 = line_start,
+			.arg1 = *line_start,
 			.arg2 = line_corner,
 		});
 
-		struct element *bend_angle = insert_cmd(&drawing, (struct command){
+		struct element *bend_angle = insert_cmd(drawing, (struct command){
 			.op = CMD_VALUE_INPUT,
 			.hidden = true,
 			.result.type = ETYPE_VALUE,
 		});
 
-		struct element *l = insert_cmd(&drawing, (struct command){
+		struct element *l = insert_cmd(drawing, (struct command){
 			.op = CMD_LINE_POINT_LINE_ANGLE,
 			.hidden = true,
 			.result.type = ETYPE_LINE,
@@ -516,7 +509,7 @@ int main(int argc, char *argv[]) {
 			.arg3 = bend_angle,
 		});
 
-		struct element *c = insert_cmd(&drawing, (struct command){
+		struct element *c = insert_cmd(drawing, (struct command){
 			.op = CMD_CIRCLE_CENTER_RADIUS,
 			.hidden = true,
 			.result.type = ETYPE_CIRCLE,
@@ -524,25 +517,35 @@ int main(int argc, char *argv[]) {
 			.arg2 = element_spacing,
 		});
 
-		struct element *p = insert_cmd(&drawing, (struct command){
+		struct element *p = insert_cmd(drawing, (struct command){
 			.op = CMD_POINT_CIRCLE_LINE,
 			.hidden = true,
 			.result.type = ETYPE_POINT,
 			.arg1 = c,
 			.arg2 = l,
 		});
-		line_end = p;
+		*line_end = p;
 	}
 
 
-	struct element *round_rad = insert_cmd(&drawing, (struct command){
+	struct element *round_rad = insert_cmd(drawing, (struct command){
 		.op = CMD_VALUE_INPUT,
 		.hidden = true,
 		.result.type = ETYPE_VALUE,
 	});
-	create_rounded_3line(&drawing, round_rad, line_start, line_corner, line_end, &line_ctr, &line_bend_start, &line_bend_end);
+	create_rounded_3line(drawing, round_rad, *line_start, line_corner, *line_end, line_ctr, line_bend_start, line_bend_end);
+}
 
-	execute_drawing(&drawing, (double[]){16, M_PI * 0.5, M_PI * 0.1, 1});
+int main(int argc, char *argv[]) {
+	struct element *line_start;
+	struct element *line_bend_start;
+	struct element *line_ctr;
+	struct element *line_bend_end;
+	struct element *line_end;
+
+	struct drawing drawing = {};
+	create_drawing(&drawing, &line_start, &line_bend_start, &line_ctr, &line_bend_end, &line_end);
+	execute_drawing(&drawing, (double[]){8, M_PI * 0.5, M_PI * 0.4, .3});
 
 	printf("<svg version=\"1.1\" viewBox=\"-50 -50 100 100\" width=\"1200\" height=\"1200\" xmlns=\"http://www.w3.org/2000/svg\">\n");
 
