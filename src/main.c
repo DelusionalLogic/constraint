@@ -165,7 +165,7 @@ struct element *create_perp(struct drawing *cmds, struct element *l, struct elem
 	struct element *c1 = insert_cmd(cmds, (struct command){
 		.op = CMD_CIRCLE_CENTER_RADIUS,
 		.result.type = ETYPE_CIRCLE,
-		.hidden = hide,
+		.hidden = true,
 		.arg1 = p,
 		.arg2 = &radius,
 	});
@@ -375,6 +375,7 @@ void execute_drawing(struct drawing *drawing, double inputs[]) {
 				assert(current->result.type == ETYPE_LINE);
 				current->result.line.norm[0] = current->arg2->point.pos[1] - current->arg1->point.pos[1];
 				current->result.line.norm[1] = current->arg1->point.pos[0] - current->arg2->point.pos[0];
+				// printf("%f %f\n", current->result.line.norm[0], current->result.line.norm[1]);
 				current->result.line.C = current->arg1->point.pos[1] * -current->result.line.norm[1] - current->result.line.norm[0] * current->arg1->point.pos[0];
 			}break;
 			case CMD_LINE_POINT_LINE_ANGLE: {
@@ -383,13 +384,21 @@ void execute_drawing(struct drawing *drawing, double inputs[]) {
 				assert(current->arg3->type == ETYPE_VALUE);
 				assert(current->result.type == ETYPE_LINE);
 
+				// printf("Rotate %f\n", current->arg3->value);
+				// printf("%f %f\n", current->arg2->line.norm[0], current->arg2->line.norm[1]);
 				glm_vec2_rotate(current->arg2->line.norm, current->arg3->value, current->result.line.norm);
+				// printf("%f %f\n", current->result.line.norm[0], current->result.line.norm[1]);
 
 				vec2 offset = {-current->arg1->point.pos[0], -current->arg1->point.pos[1]};
 				current->result.line.C = glm_vec2_dot(current->result.line.norm, offset);
 			}break;
 			case CMD_POINT_CIRCLE_LINE: {
+				assert(current->arg1->type == ETYPE_CIRCLE);
+				assert(current->arg2->type == ETYPE_LINE);
 				assert(current->result.type == ETYPE_POINT);
+				struct line translated;
+				glm_vec2_copy(current->arg2->line.norm, translated.norm);
+				translated.C = translated.C - glm_vec2_dot(translated.norm, current->arg1->circle.center);
 				circle_line_intersect(current->arg1->circle, current->arg2->line, current->root, &current->result.point);
 			}break;
 			case CMD_POINT_CIRCLE_CIRCLE: {
@@ -536,16 +545,446 @@ void create_drawing(struct drawing* drawing, struct element **line_start, struct
 	create_rounded_3line(drawing, round_rad, *line_start, line_corner, *line_end, line_ctr, line_bend_start, line_bend_end);
 }
 
-int main(int argc, char *argv[]) {
-	struct element *line_start;
-	struct element *line_bend_start;
-	struct element *line_ctr;
-	struct element *line_bend_end;
-	struct element *line_end;
+enum component_type {
+	COM_POINT,
+	COM_LINE,
+};
 
+struct component {
+	enum component_type type;
+
+	struct element *e;
+};
+
+enum constraint_type {
+	CT_POINT_POINT_DISTANCE,
+	CT_POINT_LINE_DISTANCE,
+	CT_LINE_LINE_ANGLE,
+};
+
+struct constraint {
+	enum constraint_type type;
+	double v;
+
+	struct component *c1;
+	struct component *c2;
+
+	bool used;
+};
+
+struct frontier {
+	struct component *elems[32];
+	size_t n;
+};
+
+bool frontier_scan(struct frontier *frontier, struct component *component) {
+	for(size_t i = 0; i < sizeof(frontier->elems)/sizeof(frontier->elems[0]); i++) {
+		if(frontier->elems[i] == component) return true;
+	}
+
+	return false;
+}
+
+void add_frontier(struct frontier *frontier, struct component *component) {
+	assert(!frontier_scan(frontier, component));
+	frontier->elems[frontier->n++] = component;
+}
+
+int main(int argc, char *argv[]) {
+	// struct element *line_start;
+	// struct element *line_bend_start;
+	// struct element *line_ctr;
+	// struct element *line_bend_end;
+	// struct element *line_end;
+
+	// struct drawing drawing = {};
+	// create_drawing(&drawing, &line_start, &line_bend_start, &line_ctr, &line_bend_end, &line_end);
+	// execute_drawing(&drawing, (double[]){8, M_PI * 0.5, M_PI * 0.4, .3});
+
+	// Figure 4
+	struct component components[] = {
+		{.type = COM_POINT},
+		{.type = COM_POINT},
+		{.type = COM_POINT},
+		{.type = COM_LINE},
+		{.type = COM_LINE},
+		{.type = COM_POINT},
+	};
+
+	struct constraint constraints[] = {
+		{
+			.type = CT_POINT_POINT_DISTANCE,
+			.v = 10,
+			.c1 = &components[0],
+			.c2 = &components[1],
+		},
+		{
+			.type = CT_POINT_POINT_DISTANCE,
+			.v = 10,
+			.c1 = &components[1],
+			.c2 = &components[2],
+		},
+		{
+			.type = CT_POINT_POINT_DISTANCE,
+			.v = 10,
+			.c1 = &components[2],
+			.c2 = &components[0],
+		},
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &components[3],
+			.c2 = &components[0],
+		},
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &components[1],
+			.c2 = &components[3],
+		},
+		{
+			.type = CT_LINE_LINE_ANGLE,
+			.v = 30,
+			.c1 = &components[3],
+			.c2 = &components[4],
+		},
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &components[4],
+			.c2 = &components[1],
+		},
+	};
+
+	struct frontier frontier = {};
 	struct drawing drawing = {};
-	create_drawing(&drawing, &line_start, &line_bend_start, &line_ctr, &line_bend_end, &line_end);
-	execute_drawing(&drawing, (double[]){8, M_PI * 0.5, M_PI * 0.4, .3});
+
+	// Step 1 Pick some point point distance constraint as the base
+	for(size_t i = 0; i < sizeof(constraints)/sizeof(constraints[0]); i++) {
+		assert(!constraints[i].used);
+
+		if(constraints[i].type != CT_POINT_POINT_DISTANCE) continue;
+
+		constraints[i].c1->e = insert_cmd(&drawing, (struct command){
+			.op = CMD_ORIGIN,
+			.hidden = true,
+			.result.type = ETYPE_POINT,
+		});
+
+		struct element *xaxis = insert_cmd(&drawing, (struct command){
+			.op = CMD_LINE_X,
+			.hidden = true,
+			.result.type = ETYPE_LINE,
+		});
+
+		struct element *distance = insert_cmd(&drawing, (struct command){
+			.op = CMD_VALUE_INPUT,
+			.result.type = ETYPE_VALUE,
+		});
+
+		struct element *c = insert_cmd(&drawing, (struct command){
+			.op = CMD_CIRCLE_CENTER_RADIUS,
+			.hidden = true,
+			.result.type = ETYPE_CIRCLE,
+			.arg1 = constraints[i].c1->e,
+			.arg2 = distance,
+		});
+
+		constraints[i].c2->e = insert_cmd(&drawing, (struct command){
+			.op = CMD_POINT_CIRCLE_LINE,
+			.hidden = true,
+			.result.type = ETYPE_POINT,
+			.arg1 = c,
+			.arg2 = xaxis,
+		});
+
+		add_frontier(&frontier, constraints[i].c1);
+		add_frontier(&frontier, constraints[i].c2);
+		break;
+	}
+
+	// Step 2 we iteratively expand the frontier from the selected base
+	while(true) {
+		for(size_t i = 0; i < sizeof(constraints)/sizeof(constraints[0]); i++) {
+			if(constraints[i].used) continue;
+
+			struct component *oppo_i;
+			struct component *local_i;
+
+			if(frontier_scan(&frontier, constraints[i].c1)) {
+				oppo_i = constraints[i].c2;
+				local_i = constraints[i].c1;
+			} else if(frontier_scan(&frontier, constraints[i].c2)) {
+				oppo_i = constraints[i].c1;
+				local_i = constraints[i].c2;
+			} else continue;
+
+			for(size_t j = i+1; j < sizeof(constraints)/sizeof(constraints[0]); j++) {
+				if(constraints[j].used) continue;
+
+				struct component *oppo_j;
+				struct component *local_j;
+
+				if(frontier_scan(&frontier, constraints[j].c1)) {
+					oppo_j = constraints[j].c2;
+					local_j = constraints[j].c1;
+				} else if(frontier_scan(&frontier, constraints[j].c2)) {
+					oppo_j = constraints[j].c1;
+					local_j = constraints[j].c2;
+				} else continue;
+
+				if(oppo_i != oppo_j) continue;
+
+				// printf("Detected %ld %ld\n", i, j);
+
+				if(constraints[i].type == CT_POINT_POINT_DISTANCE
+					&& local_i->type == COM_POINT
+					&& constraints[j].type == CT_POINT_POINT_DISTANCE
+					&& local_j->type == COM_POINT) {
+					assert(oppo_i->type == COM_POINT);
+
+					struct element *d1 = insert_cmd(&drawing, (struct command){
+						.op = CMD_VALUE_INPUT,
+						.result.type = ETYPE_VALUE,
+					});
+
+					struct element *d2 = insert_cmd(&drawing, (struct command){
+						.op = CMD_VALUE_INPUT,
+						.result.type = ETYPE_VALUE,
+					});
+
+					struct element *c1 = insert_cmd(&drawing, (struct command){
+						.op = CMD_CIRCLE_CENTER_RADIUS,
+						.hidden = true,
+						.result.type = ETYPE_CIRCLE,
+						.arg1 = local_i->e,
+						.arg2 = d1,
+					});
+
+					struct element *c2 = insert_cmd(&drawing, (struct command){
+						.op = CMD_CIRCLE_CENTER_RADIUS,
+						.hidden = true,
+						.result.type = ETYPE_CIRCLE,
+						.arg1 = local_j->e,
+						.arg2 = d2,
+					});
+
+					oppo_i->e = insert_cmd(&drawing, (struct command){
+						.op = CMD_POINT_CIRCLE_CIRCLE,
+						.hidden = true,
+						.result.type = ETYPE_POINT,
+						.arg1 = c1,
+						.arg2 = c2,
+					});
+				} else if(constraints[i].type == CT_POINT_LINE_DISTANCE
+					&& local_i->type == COM_POINT
+					&& constraints[j].type == CT_POINT_LINE_DISTANCE
+					&& local_j->type == COM_POINT) {
+					assert(oppo_i->type == COM_LINE);
+
+					struct element *d1 = insert_cmd(&drawing, (struct command){
+						.op = CMD_VALUE_INPUT,
+						.result.type = ETYPE_VALUE,
+					});
+					struct element *d2 = insert_cmd(&drawing, (struct command){
+						.op = CMD_VALUE_INPUT,
+						.result.type = ETYPE_VALUE,
+					});
+
+					struct element *c2 = insert_cmd(&drawing, (struct command){
+						.op = CMD_CIRCLE_CENTER_RADIUS,
+						.hidden = true,
+						.result.type = ETYPE_CIRCLE,
+						.arg1 = local_j->e,
+						.arg2 = d2,
+					});
+
+					struct element *l = insert_cmd(&drawing, (struct command){
+						.op = CMD_LINE_POINT_POINT,
+						.hidden = true,
+						.result.type = ETYPE_LINE,
+						.arg1 = local_i->e,
+						.arg2 = local_j->e,
+					});
+
+					struct element *e2 = insert_cmd(&drawing, (struct command){
+						.op = CMD_POINT_CIRCLE_LINE,
+						.hidden = true,
+						.result.type = ETYPE_POINT,
+						.arg1 = c2,
+						.arg2 = l,
+					});
+
+					struct element *c1 = insert_cmd(&drawing, (struct command){
+						.op = CMD_CIRCLE_CENTER_RADIUS,
+						.hidden = true,
+						.result.type = ETYPE_CIRCLE,
+						.arg1 = e2,
+						.arg2 = d1,
+					});
+
+					struct element *m;
+					{
+						struct element *mc1 = insert_cmd(&drawing, (struct command){
+							.op = CMD_CIRCLE_CENTER_POINT,
+							.hidden = true,
+							.result.type = ETYPE_CIRCLE,
+							.arg1 = local_i->e,
+							.arg2 = local_j->e,
+						});
+
+						struct element *mc2 = insert_cmd(&drawing, (struct command){
+							.op = CMD_CIRCLE_CENTER_POINT,
+							.hidden = true,
+							.result.type = ETYPE_CIRCLE,
+							.arg1 = local_j->e,
+							.arg2 = local_i->e,
+						});
+
+						struct element *m1 = insert_cmd(&drawing, (struct command){
+							.op = CMD_POINT_CIRCLE_CIRCLE,
+							.hidden = true,
+							.result.type = ETYPE_POINT,
+							.arg1 = mc1,
+							.arg2 = mc2,
+						});
+						struct element *m2 = insert_cmd(&drawing, (struct command){
+							.op = CMD_POINT_CIRCLE_CIRCLE,
+							.hidden = true,
+							.root = 1,
+							.result.type = ETYPE_POINT,
+							.arg1 = mc1,
+							.arg2 = mc2,
+						});
+
+						struct element *ml = insert_cmd(&drawing, (struct command){
+							.op = CMD_LINE_POINT_POINT,
+							.hidden = true,
+							.root = 1,
+							.result.type = ETYPE_LINE,
+							.arg1 = m1,
+							.arg2 = m2,
+						});
+
+						m = insert_cmd(&drawing, (struct command){
+							.op = CMD_POINT_LINE_LINE,
+							.hidden = true,
+							.result.type = ETYPE_POINT,
+							.arg1 = ml,
+							.arg2 = l,
+						});
+					}
+
+					struct element *tp;
+					struct element *pl;
+					{
+						struct element *s;
+						{
+							s = insert_cmd(&drawing, (struct command){
+								.op = CMD_POINT_CIRCLE_LINE,
+								.hidden = true,
+								.root = 1,
+								.result.type = ETYPE_POINT,
+								.arg1 = c1,
+								.arg2 = l,
+							});
+						}
+
+						struct element *c12 = insert_cmd(&drawing, (struct command){
+							.op = CMD_CIRCLE_CENTER_POINT,
+							.hidden = true,
+							.result.type = ETYPE_CIRCLE,
+							.arg1 = local_j->e,
+							.arg2 = s,
+						});
+
+						struct element *mc = insert_cmd(&drawing, (struct command){
+							.op = CMD_CIRCLE_CENTER_POINT,
+							.hidden = true,
+							.result.type = ETYPE_CIRCLE,
+							.arg1 = m,
+							.arg2 = local_j->e,
+						});
+
+						struct element *j = insert_cmd(&drawing, (struct command){
+							.op = CMD_POINT_CIRCLE_CIRCLE,
+							.hidden = true,
+							.result.type = ETYPE_POINT,
+							.arg1 = mc,
+							.arg2 = c12,
+						});
+
+						tp = insert_cmd(&drawing, (struct command){
+							.op = CMD_LINE_POINT_POINT,
+							.hidden = true,
+							.result.type = ETYPE_LINE,
+							.arg1 = local_j->e,
+							.arg2 = j,
+						});
+						// printf("%f %f\n", tp->line.norm[0], tp->line.norm[1]);
+
+						pl = insert_cmd(&drawing, (struct command){
+							.op = CMD_POINT_CIRCLE_LINE,
+							.hidden = true,
+							.root = 1,
+							.result.type = ETYPE_POINT,
+							.arg1 = c2,
+							.arg2 = tp,
+						});
+						oppo_i->e = create_perp(&drawing, tp, pl, false);
+					}
+				} else if(constraints[i].type == CT_LINE_LINE_ANGLE
+					&& local_i->type == COM_LINE
+					&& constraints[j].type == CT_POINT_LINE_DISTANCE
+					&& local_j->type == COM_POINT) {
+					assert(oppo_i->type == COM_LINE);
+
+					struct element *theta = insert_cmd(&drawing, (struct command){
+						.op = CMD_VALUE_INPUT,
+						.result.type = ETYPE_VALUE,
+					});
+
+					struct element *d = insert_cmd(&drawing, (struct command){
+						.op = CMD_VALUE_INPUT,
+						.result.type = ETYPE_VALUE,
+					});
+
+					struct element* l = insert_cmd(&drawing, (struct command){
+						.op = CMD_LINE_POINT_LINE_ANGLE,
+						.hidden = true,
+						.result.type = ETYPE_LINE,
+						.arg1 = local_j->e,
+						.arg2 = local_i->e,
+						.arg3 = theta,
+					});
+
+					struct element* c = insert_cmd(&drawing, (struct command){
+						.op = CMD_CIRCLE_CENTER_RADIUS,
+						.hidden = true,
+						.result.type = ETYPE_CIRCLE,
+						.arg1 = local_j->e,
+						.arg2 = d,
+					});
+				} else {
+					printf("Unknown constraint combination\n");
+					printf("%d %d\n", constraints[i].type, constraints[j].type);
+					abort();
+				}
+
+				add_frontier(&frontier, oppo_i);
+				constraints[i].used = true;
+				constraints[j].used = true;
+				goto candidate_found;
+			}
+		}
+		// No candidate found
+		break;
+
+candidate_found:
+		;
+	}
+
+	execute_drawing(&drawing, (double[]){8, 8, 8, 2, 2, M_PI * 0.3, 2});
 
 	printf("<svg version=\"1.1\" viewBox=\"-50 -50 100 100\" width=\"1200\" height=\"1200\" xmlns=\"http://www.w3.org/2000/svg\">\n");
 
@@ -579,9 +1018,14 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	plot_line_between(line_start->point, line_bend_start->point);
-	plot_line_between(line_bend_end->point, line_end->point);
-	plot_arc_between(line_ctr->point, line_bend_start->point, line_bend_end->point);
+	plot_line_between(components[0].e->point, components[1].e->point);
+	plot_line_between(components[1].e->point, components[2].e->point);
+	plot_line_between(components[2].e->point, components[0].e->point);
+
+	// plot_line_between(components[0].e->point, components[3].e->point);
+	// plot_line_between(components[3].e->point, components[1].e->point);
+	// plot_line_between(line_bend_end->point, line_end->point);
+	// plot_arc_between(line_ctr->point, line_bend_start->point, line_bend_end->point);
 	// plot_line_between(detector_right->point, decomposer_left->point);
 	// plot_line_between(decomposer_right->point, solver_left->point);
 	// plot_line_between(solver_right->point, solutions_left->point);
