@@ -6,7 +6,7 @@ OBJDIR ?= obj
 LIBS = -LSDL/build/ -lSDL2-2.0 -Wl,-rpath,./SDL/build/ -lglm -lm
 INCS = -ISDL/build/include/SDL2 -ISDL/build/include-config-/SDL2
 
-CFLAGS ?= -D_FORTIFY_SOURCE=2 -Wall -g -Og
+CFLAGS ?= -D_FORTIFY_SOURCE=2 -Wall -Werror -Wno-error=unused-variable -g -Og
 CFLAGS += -std=gnu11 -fms-extensions -flto
 
 APP_SOURCES = $(shell find $(SRCDIR) -name "*.c")
