@@ -113,12 +113,29 @@ void line_through_points(struct point p1, struct point p2, struct line* l) {
 	l->C = p1.pos[1] * -l->norm[1] + p1.pos[0] * -l->norm[1];
 }
 
+void line_line_intersect(struct line l1, struct line l2, struct point* p) {
+	double a1 = l1.norm[0];
+	double b1 = l1.norm[1];
+	double c1 = l1.C;
+
+	double a2 = l2.norm[0];
+	double b2 = l2.norm[1];
+	double c2 = l2.C;
+
+	p->pos[0] = -(c1*b2 - c2*b1) / (a1*b2 - a2*b1);
+	p->pos[1] = -(a1*c2 - a2*c1) / (a1*b2 - a2*b1);
+}
+
 void plot_point(struct point p) {
 	printf("<circle cx=\"%f\" cy=\"%f\" r=\".4\" fill=\"black\" />\n", p.pos[0], -p.pos[1]);
 }
 
 void plot_line_between(struct point p1, struct point p2) {
 	printf("<line x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\" stroke=\"black\" stroke-width=\".2\" />\n", p1.pos[0], -p1.pos[1], p2.pos[0], -p2.pos[1]);
+}
+
+void plot_text(struct point p, double angle, char* str) {
+	printf("<text text-anchor=\"middle\" dominant-baseline=\"central\" transform=\"translate(%f, %f) scale(1, -1) rotate(%f) scale(1, -1)\" font-size=\"0.75\">%s</text>\n", p.pos[0], -p.pos[1], angle * (180.0/M_PI), str);
 }
 
 void plot_line(struct line l) {
@@ -474,16 +491,7 @@ void execute_drawing(struct drawing *drawing, double inputs[]) {
 			}break;
 			case CMD_POINT_LINE_LINE: {
 				assert(current->result.type == ETYPE_POINT);
-				double a1 = current->arg1->line.norm[0];
-				double b1 = current->arg1->line.norm[1];
-				double c1 = current->arg1->line.C;
-
-				double a2 = current->arg2->line.norm[0];
-				double b2 = current->arg2->line.norm[1];
-				double c2 = current->arg2->line.C;
-
-				current->result.point.pos[0] = -(c1*b2 - c2*b1) / (a1*b2 - a2*b1);
-				current->result.point.pos[1] = -(a1*c2 - a2*c1) / (a1*b2 - a2*b1);
+				line_line_intersect(current->arg1->line, current->arg2->line, &current->result.point);
 			}break;
 			case CMD_CIRCLE_CENTER_POINT: {
 				assert(current->result.type == ETYPE_CIRCLE);
@@ -670,7 +678,7 @@ int main(int argc, char *argv[]) {
 	struct constraint constraints[] = {
 		{
 			.type = CT_POINT_POINT_DISTANCE,
-			.v = 10,
+			.v = 13,
 			.c1 = &components[0],
 			.c2 = &components[1],
 		},
@@ -700,7 +708,7 @@ int main(int argc, char *argv[]) {
 		},
 		{
 			.type = CT_LINE_LINE_ANGLE,
-			.v = 30,
+			.v = M_PI/1.7,
 			.c1 = &components[3],
 			.c2 = &components[4],
 		},
@@ -718,7 +726,7 @@ int main(int argc, char *argv[]) {
 		},
 		{
 			.type = CT_POINT_POINT_DISTANCE,
-			.v = 20,
+			.v = 12.8,
 			.c2 = &components[5],
 			.c1 = &components[0],
 		},
@@ -971,7 +979,12 @@ candidate_found:
 		;
 	}
 
-	execute_drawing(&drawing, (double[]){8, 8, 8, 0, 0, M_PI * 0.5, 0, 0, 15});
+	double *params = malloc(sizeof(double) * (sizeof(components[0])/sizeof(components)));
+	for(size_t i = 0; i < sizeof(constraints)/sizeof(constraints[0]); i++) {
+		params[i] = constraints[i].v;
+	}
+
+	execute_drawing(&drawing, params);
 
 	printf("<svg version=\"1.1\" viewBox=\"-50 -50 100 100\" width=\"1200\" height=\"1200\" xmlns=\"http://www.w3.org/2000/svg\">\n");
 
@@ -1012,6 +1025,116 @@ candidate_found:
 	plot_line_between(components[2].e->point, components[0].e->point);
 	plot_line_between(components[1].e->point, components[5].e->point);
 	plot_line_between(components[5].e->point, components[0].e->point);
+
+	double text_offset = .4;
+
+	for(size_t i = 0; i < sizeof(constraints)/sizeof(constraints[0]); i++) {
+		struct constraint *constraint = &constraints[i];
+		switch(constraint->type) {
+			case CT_POINT_POINT_DISTANCE: {
+				assert(constraint->c1->type == COM_POINT);
+				assert(constraint->c2->type == COM_POINT);
+				vec2 dir;
+				glm_vec2_sub(constraint->c2->e->point.pos, constraint->c1->e->point.pos, dir);
+				glm_vec2_normalize(dir);
+				vec2 norm = {-dir[1], dir[0]};
+
+				struct point start;
+				struct point end;
+				{
+					glm_vec2_add(constraint->c1->e->point.pos, norm, start.pos);
+					glm_vec2_add(constraint->c2->e->point.pos, norm, end.pos);
+					plot_line_between(start, end);
+				}
+
+				// The little wings to highlight the ends
+				vec2 tip = {.3, .3};
+				glm_vec2_mul(norm, tip, tip);
+				{
+					struct point p1;
+					struct point p2;
+					glm_vec2_add(start.pos, tip, p1.pos);
+					glm_vec2_sub(start.pos, tip, p2.pos);
+					plot_line_between(p1, p2);
+				}
+				{
+					struct point p1;
+					struct point p2;
+					glm_vec2_add(end.pos, tip, p1.pos);
+					glm_vec2_sub(end.pos, tip, p2.pos);
+					plot_line_between(p1, p2);
+				}
+
+				// The text
+				{
+					struct point p;
+					glm_vec2_lerp(start.pos, end.pos, 0.5, p.pos);
+
+					glm_vec2_muladds(norm, text_offset, p.pos);
+
+					double angle = atan2(dir[1], dir[0]);
+
+					// Flip upside down labels
+					if(angle > M_PI/2) {
+						glm_vec2_muladds(norm, 0.1, p.pos);
+						angle -= M_PI;
+					}
+					if(angle < -M_PI/2) {
+						glm_vec2_muladds(norm, 0.1, p.pos);
+						angle += M_PI;
+					}
+
+					assert(angle >= -M_PI);
+					assert(angle <=  M_PI);
+
+					char buf[512];
+					snprintf(buf, sizeof(buf), "%.1f u", constraint->v);
+					plot_text(p, angle, buf);
+				}
+			} break;
+			case CT_LINE_LINE_ANGLE: {
+				assert(constraint->c1->type == COM_LINE);
+				assert(constraint->c2->type == COM_LINE);
+
+				struct line *l1 = &constraint->c1->e->line;
+				struct line *l2 = &constraint->c2->e->line;
+
+				struct point intersect;
+				line_line_intersect(*l1, *l2, &intersect);
+
+				struct circle c = { .radius = 1.3 };
+				glm_vec2_copy(intersect.pos, c.center);
+
+				struct point p1;
+				circle_line_intersect(c, *l1, 0, &p1);
+				struct point p2;
+				circle_line_intersect(c, *l2, 0, &p2);
+
+				plot_arc_between(intersect, p2, p1);
+
+				vec2 l1v;
+				vec2 l2v;
+				glm_vec2_normalize_to(l1->norm, l1v);
+				glm_vec2_normalize_to(l2->norm, l2v);
+
+				// Label
+				double dot = glm_vec2_dot(l1v, l2v);
+				double det = l1v[0]*l2v[1] - l1v[1]*l2v[0];
+				double angle = atan2(det, dot);
+
+				angle = angle / 2;
+
+				vec2 v = {cos(angle), sin(angle)};
+				glm_vec2_muladds(v, c.radius + text_offset, intersect.pos);
+
+				char buf[512];
+				snprintf(buf, sizeof(buf), "%.1f°", constraint->v);
+				plot_text(intersect, angle - M_PI/2, buf);
+			} break;
+			case CT_POINT_LINE_DISTANCE:
+				break;
+        }
+	}
 
 	// plot_line_between(components[0].e->point, components[3].e->point);
 	// plot_line_between(components[3].e->point, components[1].e->point);
