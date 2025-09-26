@@ -979,7 +979,7 @@ candidate_found:
 		;
 	}
 
-	double *params = malloc(sizeof(double) * (sizeof(components[0])/sizeof(components)));
+	double *params = malloc(sizeof(double) * (sizeof(constraints)/sizeof(constraints[0])));
 	for(size_t i = 0; i < sizeof(constraints)/sizeof(constraints[0]); i++) {
 		params[i] = constraints[i].v;
 	}

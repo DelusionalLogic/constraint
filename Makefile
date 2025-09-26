@@ -3,11 +3,11 @@ CC ?= gcc
 SRCDIR ?= src
 OBJDIR ?= obj
 
-LIBS = $(shell pkg-config --libs SDL2) -Wl,-rpath,./SDL/build/ $(shell pkg-config --libs cglm)
-INCS = -ISDL/build/include/SDL2 -ISDL/build/include-config-/SDL2
+LIBS = -lm
+INCS = -Ithirdparty/cglm/include
 
 CFLAGS ?= -D_FORTIFY_SOURCE=2 -Wall -Werror -Wno-error=unused-variable -g -Og
-CFLAGS += -std=gnu11 -fms-extensions -flto $(shell pkg-config --cflags cglm)
+CFLAGS += -std=gnu11 -fms-extensions -flto
 
 APP_SOURCES = $(shell find $(SRCDIR) -name "*.c")
 APP_OBJS = $(APP_SOURCES:%.c=$(OBJDIR)/%.o)
