@@ -5,6 +5,8 @@
 #include <cglm/cglm.h>
 #include <string.h>
 
+#define TEXT_OFFSET 0.4
+
 enum operation {
 	CMD_VALUE_INPUT,
 	CMD_ORIGIN,
@@ -72,9 +74,11 @@ struct command {
 struct drawing {
 	struct command *root;
 	struct command *tail;
+
+	struct command *error;
 };
 
-void circle_line_intersect(struct circle circle, struct line line, uint8_t root, struct point *point) {
+bool circle_line_intersect(struct circle circle, struct line line, uint8_t root, struct point *point) {
 	double a = line.norm[0];
 	double b = line.norm[1];
 	double c = line.C + glm_vec2_dot(line.norm, circle.center);
@@ -86,8 +90,7 @@ void circle_line_intersect(struct circle circle, struct line line, uint8_t root,
 	double r2 = pow(circle.radius, 2); 
 	double test = r2 * rec; 
 	if(pow(c, 2.0) - test > DBL_EPSILON * 1e14) {
-		printf("Expected an intersection between circle and line\n");
-		assert(false);
+		return false;
 	} else if(fabs(pow(c, 2) - test) < DBL_EPSILON * 1e14) {
 		point->pos[0] = x0;
 		point->pos[1] = y0;
@@ -105,6 +108,7 @@ void circle_line_intersect(struct circle circle, struct line line, uint8_t root,
 	}
 
 	glm_vec2_add(point->pos, circle.center, point->pos);
+	return true;
 }
 
 void line_through_points(struct point p1, struct point p2, struct line* l) {
@@ -141,7 +145,7 @@ void plot_text(struct point p, double angle, char* str) {
 void plot_line(struct line l) {
 	// @HACK I've just duplicated this for vertical lines. There's a more
 	// efficient solution
-	if(l.norm[1] != 0) {
+	if(l.norm[1] > DBL_EPSILON) {
 		double minx = -50;
 		double maxx =  50;
 
@@ -182,6 +186,116 @@ void plot_arc_between(struct point c, struct point p1, struct point p2) {
 
 void plot_circle(struct circle c) {
 	printf("<circle cx=\"%f\" cy=\"%f\" r=\"%f\" fill=\"none\" stroke=\"black\" stroke-width=\".1\" />\n", c.center[0], -c.center[1], c.radius);
+}
+
+void plot_generic(struct element e) {
+	switch(e.type) {
+		case ETYPE_VALUE:
+			break;
+		case ETYPE_CIRCLE:
+			plot_circle(e.circle);
+			break;
+		case ETYPE_POINT:
+			plot_point(e.point);
+			break;
+		case ETYPE_LINE:
+			plot_line(e.line);
+			break;
+	}
+}
+
+void plot_distance_indicator(struct point p1, struct point p2, double distance) {
+	vec2 dir;
+	glm_vec2_sub(p2.pos, p1.pos, dir);
+	glm_vec2_normalize(dir);
+	vec2 norm = {-dir[1], dir[0]};
+
+	struct point start;
+	struct point end;
+	{
+		glm_vec2_add(p1.pos, norm, start.pos);
+		glm_vec2_add(p2.pos, norm, end.pos);
+		plot_line_between(start, end);
+	}
+
+	// The little wings to highlight the ends
+	vec2 tip = {.3, .3};
+	glm_vec2_mul(norm, tip, tip);
+	{
+		struct point p1;
+		struct point p2;
+		glm_vec2_add(start.pos, tip, p1.pos);
+		glm_vec2_sub(start.pos, tip, p2.pos);
+		plot_line_between(p1, p2);
+	}
+	{
+		struct point p1;
+		struct point p2;
+		glm_vec2_add(end.pos, tip, p1.pos);
+		glm_vec2_sub(end.pos, tip, p2.pos);
+		plot_line_between(p1, p2);
+	}
+
+	// The text
+	{
+		struct point p;
+		glm_vec2_lerp(start.pos, end.pos, 0.5, p.pos);
+
+		glm_vec2_muladds(norm, TEXT_OFFSET, p.pos);
+
+		double angle = atan2(dir[1], dir[0]);
+
+		// Flip upside down labels
+		if(angle > M_PI/2) {
+			glm_vec2_muladds(norm, 0.1, p.pos);
+			angle -= M_PI;
+		}
+		if(angle < -M_PI/2) {
+			glm_vec2_muladds(norm, 0.1, p.pos);
+			angle += M_PI;
+		}
+
+		assert(angle >= -M_PI);
+		assert(angle <=  M_PI);
+
+		char buf[512];
+		snprintf(buf, sizeof(buf), "%.1f u", distance);
+		plot_text(p, angle, buf);
+	}
+}
+
+void plot_angle(struct line l1, struct line l2, double theta) {
+	struct point intersect;
+	line_line_intersect(l1, l2, &intersect);
+
+	struct circle c = { .radius = 1.3 };
+	glm_vec2_copy(intersect.pos, c.center);
+
+	struct point p1;
+	circle_line_intersect(c, l1, 0, &p1);
+	struct point p2;
+	circle_line_intersect(c, l2, 0, &p2);
+
+	plot_arc_between(intersect, p2, p1);
+
+	vec2 l1v;
+	vec2 l2v;
+	glm_vec2_normalize_to(l1.norm, l1v);
+	glm_vec2_normalize_to(l2.norm, l2v);
+
+	// Label
+	double dot = glm_vec2_dot(l1v, l2v);
+	double det = l1v[0]*l2v[1] - l1v[1]*l2v[0];
+	double angle = atan2(det, dot);
+
+	angle = angle / 2;
+
+	vec2 v = {cos(angle), sin(angle)};
+	glm_vec2_muladds(v, c.radius + TEXT_OFFSET, intersect.pos);
+
+	char buf[512];
+	snprintf(buf, sizeof(buf), "%.1f°", theta);
+	plot_text(intersect, angle - M_PI/2, buf);
 }
 
 struct element* insert_cmd(struct drawing *drawing, struct command cmd) {
@@ -476,8 +590,7 @@ void execute_drawing(struct drawing *drawing, double inputs[]) {
 			}break;
 			case CMD_POINT_CIRCLE_CIRCLE: {
 				assert(current->result.type == ETYPE_POINT);
-				vec2 between_centers;
-				glm_vec2_sub(current->arg1->circle.center, current->arg2->circle.center, between_centers);
+				vec2 between_centers; glm_vec2_sub(current->arg1->circle.center, current->arg2->circle.center, between_centers);
 				glm_vec2_mul(between_centers, (vec2){2, 2}, between_centers);
 				double a = between_centers[0];
 				double b = between_centers[1];
@@ -487,7 +600,10 @@ void execute_drawing(struct drawing *drawing, double inputs[]) {
 						(pow(current->arg2->circle.radius, 2) - pow(current->arg1->circle.radius, 2));
 
 				struct line radical_axis = { {a, b}, c };
-				circle_line_intersect(current->arg1->circle, radical_axis, current->root, &current->result.point);
+				if(!circle_line_intersect(current->arg1->circle, radical_axis, current->root, &current->result.point)) {
+					drawing->error = current;
+					return;
+				}
 			}break;
 			case CMD_POINT_LINE_LINE: {
 				assert(current->result.type == ETYPE_POINT);
@@ -626,6 +742,12 @@ enum constraint_type {
 	CT_LINE_LINE_ANGLE,
 };
 
+char *constraint_type_name[] = {
+	[CT_POINT_POINT_DISTANCE] = "Point Point Distance",
+	[CT_POINT_LINE_DISTANCE] = "Point Line Distance",
+	[CT_LINE_LINE_ANGLE] = "Line Line Angle",
+};
+
 struct constraint {
 	enum constraint_type type;
 	double v;
@@ -633,6 +755,7 @@ struct constraint {
 	struct component *c1;
 	struct component *c2;
 
+	uint64_t order;
 	bool used;
 };
 
@@ -654,6 +777,22 @@ void add_frontier(struct frontier *frontier, struct component *component) {
 	frontier->elems[frontier->n++] = component;
 }
 
+struct smooth_line {
+	struct component l1;
+	struct component l2;
+
+	struct component corner;
+	struct component corner_center;
+	struct component end;
+	struct component start;
+
+	struct component perp1;
+	struct component perp2;
+
+	struct component corner_start;
+	struct component corner_end;
+};
+
 int main(int argc, char *argv[]) {
 	// struct element *line_start;
 	// struct element *line_bend_start;
@@ -673,6 +812,21 @@ int main(int argc, char *argv[]) {
 		{.type = COM_LINE},
 		{.type = COM_LINE},
 		{.type = COM_POINT},
+	};
+
+	struct smooth_line line = {
+		.l1 = {.type = COM_LINE},
+		.l2 = {.type = COM_LINE},
+		.corner = {.type = COM_POINT},
+		.corner_center = {.type = COM_POINT},
+		.end = {.type = COM_POINT},
+		.start = {.type = COM_POINT},
+
+		.perp1 = {.type = COM_LINE},
+		.perp2 = {.type = COM_LINE},
+
+		.corner_start = {.type = COM_POINT},
+		.corner_end = {.type = COM_POINT},
 	};
 
 	struct constraint constraints[] = {
@@ -697,8 +851,8 @@ int main(int argc, char *argv[]) {
 		{
 			.type = CT_POINT_LINE_DISTANCE,
 			.v = 0,
-			.c2 = &components[0],
-			.c1 = &components[3],
+			.c1 = &components[0],
+			.c2 = &components[3],
 		},
 		{
 			.type = CT_POINT_LINE_DISTANCE,
@@ -721,19 +875,137 @@ int main(int argc, char *argv[]) {
 		{
 			.type = CT_POINT_LINE_DISTANCE,
 			.v = 0,
-			.c2 = &components[4],
-			.c1 = &components[5],
+			.c1 = &components[4],
+			.c2 = &components[5],
 		},
 		{
 			.type = CT_POINT_POINT_DISTANCE,
 			.v = 12.8,
-			.c2 = &components[5],
 			.c1 = &components[0],
+			.c2 = &components[5],
+		},
+
+		{
+			.type = CT_LINE_LINE_ANGLE,
+			.v = M_PI/2,
+			.c1 = &components[3],
+			.c2 = &line.l1,
+		},
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &components[5],
+			.c2 = &line.l1,
+		},
+
+		{
+			.type = CT_LINE_LINE_ANGLE,
+			.v = -M_PI/2,
+			.c1 = &line.l2,
+			.c2 = &line.l1,
+		},
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &line.corner,
+			.c2 = &line.l2,
+		},
+
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &line.corner,
+			.c2 = &line.l1,
+		},
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &line.end,
+			.c2 = &line.l2,
+		},
+
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 10,
+			.c1 = &line.end,
+			.c2 = &line.l1,
+		},
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 12,
+			.c1 = &line.end,
+			.c2 = &components[3],
+		},
+
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 1,
+			.c1 = &line.corner_center,
+			.c2 = &line.l1,
+		},
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = -1,
+			.c1 = &line.corner_center,
+			.c2 = &line.l2,
+		},
+
+		{
+			.type = CT_LINE_LINE_ANGLE,
+			.v = M_PI/2,
+			.c1 = &line.perp1,
+			.c2 = &line.l1,
+		},
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &line.corner_center,
+			.c2 = &line.perp1,
+		},
+
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &line.corner_start,
+			.c2 = &line.perp1,
+		},
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &line.corner_start,
+			.c2 = &line.l1,
+		},
+
+		{
+			.type = CT_LINE_LINE_ANGLE,
+			.v = M_PI/2,
+			.c1 = &line.perp2,
+			.c2 = &line.l2,
+		},
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &line.corner_center,
+			.c2 = &line.perp2,
+		},
+
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &line.corner_end,
+			.c2 = &line.perp2,
+		},
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &line.corner_end,
+			.c2 = &line.l2,
 		},
 	};
 
 	struct frontier frontier = {};
 	struct drawing drawing = {};
+	uint64_t order = 1;
 
 	// Step 1 Pick some point point distance constraint as the base
 	for(size_t i = 0; i < sizeof(constraints)/sizeof(constraints[0]); i++) {
@@ -774,6 +1046,8 @@ int main(int argc, char *argv[]) {
 			.arg2 = xaxis,
 		});
 
+		constraints[i].used = true;
+		constraints[i].order = order++;
 		add_frontier(&frontier, constraints[i].c1);
 		add_frontier(&frontier, constraints[i].c2);
 		break;
@@ -890,6 +1164,44 @@ int main(int argc, char *argv[]) {
 						.arg1 = c1,
 						.arg2 = c2,
 					});
+				} else if(constraints[i].type == CT_POINT_LINE_DISTANCE
+					&& local_i->type == COM_LINE
+					&& constraints[j].type == CT_POINT_LINE_DISTANCE
+					&& local_j->type == COM_LINE) {
+					assert(oppo_i->type == COM_POINT);
+
+					struct element *d1 = insert_cmd(&drawing, (struct command){
+						.op = CMD_VALUE_INPUT,
+						.result.type = ETYPE_VALUE,
+					});
+					struct element *d2 = insert_cmd(&drawing, (struct command){
+						.op = CMD_VALUE_INPUT,
+						.result.type = ETYPE_VALUE,
+					});
+
+					struct element *l1 = insert_cmd(&drawing, (struct command){
+						.op = CMD_LINE_LINE_DISTANCE_PARALLEL,
+						.hidden = true,
+						.result.type = ETYPE_LINE,
+						.arg1 = local_i->e,
+						.arg2 = d1,
+					});
+
+					struct element *l2 = insert_cmd(&drawing, (struct command){
+						.op = CMD_LINE_LINE_DISTANCE_PARALLEL,
+						.hidden = true,
+						.result.type = ETYPE_LINE,
+						.arg1 = local_j->e,
+						.arg2 = d2,
+					});
+
+					oppo_i->e = insert_cmd(&drawing, (struct command){
+						.op = CMD_POINT_LINE_LINE,
+						.hidden = true,
+						.result.type = ETYPE_POINT,
+						.arg1 = l1,
+						.arg2 = l2,
+					});
 				} else if(constraints[i].type == CT_LINE_LINE_ANGLE
 					&& local_i->type == COM_LINE
 					&& constraints[j].type == CT_POINT_LINE_DISTANCE
@@ -961,14 +1273,15 @@ int main(int argc, char *argv[]) {
 						.arg2 = l,
 					});
 				} else {
-					printf("Unknown constraint combination\n");
-					printf("%d %d\n", constraints[i].type, constraints[j].type);
+					printf("Unknown constraint combination %s and %s\n", constraint_type_name[constraints[i].type], constraint_type_name[constraints[j].type]);
 					abort();
 				}
 
 				add_frontier(&frontier, oppo_i);
 				constraints[i].used = true;
+				constraints[i].order = order++;
 				constraints[j].used = true;
+				constraints[j].order = order++;
 				goto candidate_found;
 			}
 		}
@@ -981,7 +1294,7 @@ candidate_found:
 
 	double *params = malloc(sizeof(double) * (sizeof(constraints)/sizeof(constraints[0])));
 	for(size_t i = 0; i < sizeof(constraints)/sizeof(constraints[0]); i++) {
-		params[i] = constraints[i].v;
+		params[constraints[i].order-1] = constraints[i].v;
 	}
 
 	execute_drawing(&drawing, params);
@@ -992,32 +1305,14 @@ candidate_found:
 	printf("<line x1=\"-1000\" y1=\"0\" x2=\"1000\" y2=\"0\" stroke=\"black\" stroke-width=\"0.1\" stroke-opacity=\"0.4\" />\n");
 	printf("<line y1=\"-1000\" x1=\"0\" y2=\"1000\" x2=\"0\" stroke=\"black\" stroke-width=\"0.1\" stroke-opacity=\"0.4\" />\n");
 
-	for(struct command *current = drawing.root; current != NULL; current = current->next) {
+	for(struct command *current = drawing.root; current != NULL && current != drawing.error; current = current->next) {
 		if(current->hidden) continue;
-		switch(current->op) {
-			case CMD_VALUE_INPUT:
-				break;
-			case CMD_ORIGIN:
-			case CMD_POINT_CIRCLE_LINE:
-			case CMD_POINT_CIRCLE_CIRCLE:
-			case CMD_POINT_LINE_LINE:
-				assert(current->result.type == ETYPE_POINT);
-				plot_point(current->result.point);
-				break;
-			case CMD_CIRCLE_CENTER_RADIUS:
-			case CMD_CIRCLE_CENTER_POINT:
-				assert(current->result.type == ETYPE_CIRCLE);
-				plot_circle(current->result.circle);
-				break;
-			case CMD_LINE_X:
-			case CMD_LINE_POINT_POINT:
-			case CMD_LINE_POINT_LINE_ANGLE:
-			case CMD_LINE_LINE_DISTANCE_PARALLEL:
-			case CMD_LINE_CIRCLE_CIRCLE_TANGENT:
-				assert(current->result.type == ETYPE_LINE);
-				plot_line(current->result.line);
-				break;
-		}
+		plot_generic(current->result);
+	}
+
+	if(drawing.error != NULL) {
+		plot_generic(*drawing.error->arg1);
+		plot_generic(*drawing.error->arg2);
 	}
 
 	// plot_line_between(components[0].e->point, components[1].e->point);
@@ -1026,114 +1321,36 @@ candidate_found:
 	plot_line_between(components[1].e->point, components[5].e->point);
 	plot_line_between(components[5].e->point, components[0].e->point);
 
-	double text_offset = .4;
+	plot_line_between(components[5].e->point, line.corner_start.e->point);
+	plot_line_between(line.corner_end.e->point, line.end.e->point);
+	// plot_generic(*bend[0].e);
+	// plot_generic(*bend[1].e);
+	// plot_generic(*bend[2].e);
+	// plot_generic(*bend[3].e);
+	// plot_generic(*bend[4].e);
+	plot_arc_between(line.corner_center.e->point, line.corner_end.e->point, line.corner_start.e->point);
+	// plot_generic(*bend[8].e);
 
-	for(size_t i = 0; i < sizeof(constraints)/sizeof(constraints[0]); i++) {
-		struct constraint *constraint = &constraints[i];
-		switch(constraint->type) {
-			case CT_POINT_POINT_DISTANCE: {
-				assert(constraint->c1->type == COM_POINT);
-				assert(constraint->c2->type == COM_POINT);
-				vec2 dir;
-				glm_vec2_sub(constraint->c2->e->point.pos, constraint->c1->e->point.pos, dir);
-				glm_vec2_normalize(dir);
-				vec2 norm = {-dir[1], dir[0]};
+	if(true) {
+		for(size_t i = 0; i < sizeof(constraints)/sizeof(constraints[0]); i++) {
+			struct constraint *constraint = &constraints[i];
+			if(!constraint->used) continue;
 
-				struct point start;
-				struct point end;
-				{
-					glm_vec2_add(constraint->c1->e->point.pos, norm, start.pos);
-					glm_vec2_add(constraint->c2->e->point.pos, norm, end.pos);
-					plot_line_between(start, end);
-				}
-
-				// The little wings to highlight the ends
-				vec2 tip = {.3, .3};
-				glm_vec2_mul(norm, tip, tip);
-				{
-					struct point p1;
-					struct point p2;
-					glm_vec2_add(start.pos, tip, p1.pos);
-					glm_vec2_sub(start.pos, tip, p2.pos);
-					plot_line_between(p1, p2);
-				}
-				{
-					struct point p1;
-					struct point p2;
-					glm_vec2_add(end.pos, tip, p1.pos);
-					glm_vec2_sub(end.pos, tip, p2.pos);
-					plot_line_between(p1, p2);
-				}
-
-				// The text
-				{
-					struct point p;
-					glm_vec2_lerp(start.pos, end.pos, 0.5, p.pos);
-
-					glm_vec2_muladds(norm, text_offset, p.pos);
-
-					double angle = atan2(dir[1], dir[0]);
-
-					// Flip upside down labels
-					if(angle > M_PI/2) {
-						glm_vec2_muladds(norm, 0.1, p.pos);
-						angle -= M_PI;
-					}
-					if(angle < -M_PI/2) {
-						glm_vec2_muladds(norm, 0.1, p.pos);
-						angle += M_PI;
-					}
-
-					assert(angle >= -M_PI);
-					assert(angle <=  M_PI);
-
-					char buf[512];
-					snprintf(buf, sizeof(buf), "%.1f u", constraint->v);
-					plot_text(p, angle, buf);
-				}
-			} break;
-			case CT_LINE_LINE_ANGLE: {
-				assert(constraint->c1->type == COM_LINE);
-				assert(constraint->c2->type == COM_LINE);
-
-				struct line *l1 = &constraint->c1->e->line;
-				struct line *l2 = &constraint->c2->e->line;
-
-				struct point intersect;
-				line_line_intersect(*l1, *l2, &intersect);
-
-				struct circle c = { .radius = 1.3 };
-				glm_vec2_copy(intersect.pos, c.center);
-
-				struct point p1;
-				circle_line_intersect(c, *l1, 0, &p1);
-				struct point p2;
-				circle_line_intersect(c, *l2, 0, &p2);
-
-				plot_arc_between(intersect, p2, p1);
-
-				vec2 l1v;
-				vec2 l2v;
-				glm_vec2_normalize_to(l1->norm, l1v);
-				glm_vec2_normalize_to(l2->norm, l2v);
-
-				// Label
-				double dot = glm_vec2_dot(l1v, l2v);
-				double det = l1v[0]*l2v[1] - l1v[1]*l2v[0];
-				double angle = atan2(det, dot);
-
-				angle = angle / 2;
-
-				vec2 v = {cos(angle), sin(angle)};
-				glm_vec2_muladds(v, c.radius + text_offset, intersect.pos);
-
-				char buf[512];
-				snprintf(buf, sizeof(buf), "%.1f°", constraint->v);
-				plot_text(intersect, angle - M_PI/2, buf);
-			} break;
-			case CT_POINT_LINE_DISTANCE:
-				break;
-        }
+			switch(constraint->type) {
+				case CT_POINT_POINT_DISTANCE: {
+					assert(constraint->c1->type == COM_POINT);
+					assert(constraint->c2->type == COM_POINT);
+					plot_distance_indicator(constraint->c1->e->point, constraint->c2->e->point, constraint->v);
+				} break;
+				case CT_LINE_LINE_ANGLE: {
+					assert(constraint->c1->type == COM_LINE);
+					assert(constraint->c2->type == COM_LINE);
+					plot_angle(constraint->c1->e->line, constraint->c2->e->line, constraint->v);
+				} break;
+				case CT_POINT_LINE_DISTANCE:
+					break;
+			}
+		}
 	}
 
 	// plot_line_between(components[0].e->point, components[3].e->point);
