@@ -142,36 +142,54 @@ void plot_text(struct point p, double angle, char* str) {
 	printf("<text text-anchor=\"middle\" dominant-baseline=\"central\" transform=\"translate(%f, %f) scale(1, -1) rotate(%f) scale(1, -1)\" font-size=\"0.75\">%s</text>\n", p.pos[0], -p.pos[1], angle * (180.0/M_PI), str);
 }
 
-void plot_line(struct line l) {
-	// @HACK I've just duplicated this for vertical lines. There's a more
-	// efficient solution
-	if(l.norm[1] > DBL_EPSILON) {
+enum LineStyle {
+	LSTYLE_NORMAL,
+	LSTYLE_CONSTRUCTION,
+};
+
+void plot_line_style(struct line l, enum LineStyle style) {
+	char *style_str;
+	switch(style) {
+		case LSTYLE_NORMAL:
+			style_str = "stroke=\"black\" stroke-width=\"0.2\"";
+			break;
+		case LSTYLE_CONSTRUCTION:
+			style_str = "stroke=\"blue\" stroke-width=\"0.1\" stroke-dasharray=\"0.7,0.5\" stroke-opacity=\"0.3\"";
+			break;
+	}
+        if(fabs(l.norm[0]) < fabs(l.norm[1])) {
 		double minx = -50;
 		double maxx =  50;
 
 		double miny = -(l.norm[0] * minx + l.C) / l.norm[1];
 		double maxy = -(l.norm[0] * maxx + l.C) / l.norm[1];
-		printf("<line x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\" stroke=\"black\" stroke-width=\".2\" />\n", minx, -miny, maxx, -maxy);
+		printf("<line %s x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\" />\n", style_str, minx, -miny, maxx, -maxy);
 	} else {
 		double miny = -50;
 		double maxy =  50;
 
 		double minx = -(l.norm[1] * miny + l.C) / l.norm[0];
 		double maxx = -(l.norm[1] * maxy + l.C) / l.norm[0];
-		printf("<line x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\" stroke=\"black\" stroke-width=\".2\" />\n", minx, -miny, maxx, -maxy);
+		printf("<line %s x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\" />\n", style_str, minx, -miny, maxx, -maxy);
 	}
 
-	double d0 = glm_vec2_norm2(l.norm);
+	if(LSTYLE_NORMAL) {
+		double d0 = glm_vec2_norm2(l.norm);
 
-	vec2 p0 = {0, 0};
-	glm_vec2_mulsubs(l.norm, l.C, p0);
-	glm_vec2_divs(p0, d0, p0);
+		vec2 p0 = {0, 0};
+		glm_vec2_mulsubs(l.norm, l.C, p0);
+		glm_vec2_divs(p0, d0, p0);
 
-	vec2 p1;
-	glm_vec2_add(p0, l.norm, p1);
-	// printf("%f %f\n", l.norm[0], l.norm[1]);
+		vec2 p1;
+		glm_vec2_add(p0, l.norm, p1);
+		// printf("%f %f\n", l.norm[0], l.norm[1]);
 
-	printf("<line x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\" stroke=\"black\" stroke-width=\".2\" />\n", p0[0], -p0[1], p1[0], -p1[1]);
+		printf("<line x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\" stroke=\"black\" stroke-width=\".2\" />\n", p0[0], -p0[1], p1[0], -p1[1]);
+	}
+}
+
+void plot_line(struct line l) {
+	plot_line_style(l, LSTYLE_NORMAL);
 }
 
 void plot_arc_between(struct point c, struct point p1, struct point p2) {
@@ -284,18 +302,25 @@ void plot_angle(struct line l1, struct line l2, double theta) {
 	glm_vec2_normalize_to(l2.norm, l2v);
 
 	// Label
-	double dot = glm_vec2_dot(l1v, l2v);
-	double det = l1v[0]*l2v[1] - l1v[1]*l2v[0];
+	glm_vec2_negate(l2v);
+
+	vec2 x;
+	glm_vec2_add(l1v, l2v, x);
+	glm_vec2_normalize(x);
+
+	glm_vec2_muladds(x, c.radius + TEXT_OFFSET, intersect.pos);
+
+	double dot = x[0];
+	double det = x[1];
+
 	double angle = atan2(det, dot);
-
-	angle = angle / 2;
-
-	vec2 v = {cos(angle), sin(angle)};
-	glm_vec2_muladds(v, c.radius + TEXT_OFFSET, intersect.pos);
 
 	char buf[512];
 	snprintf(buf, sizeof(buf), "%.1f°", theta);
 	plot_text(intersect, angle - M_PI/2, buf);
+
+	plot_line_style(l1, LSTYLE_CONSTRUCTION);
+	plot_line_style(l2, LSTYLE_CONSTRUCTION);
 }
 
 struct element* insert_cmd(struct drawing *drawing, struct command cmd) {
@@ -953,8 +978,8 @@ int main(int argc, char *argv[]) {
 		{
 			.type = CT_LINE_LINE_ANGLE,
 			.v = M_PI/2,
-			.c1 = &line.perp1,
-			.c2 = &line.l1,
+			.c1 = &line.l1,
+			.c2 = &line.perp1,
 		},
 		{
 			.type = CT_POINT_LINE_DISTANCE,
@@ -979,8 +1004,8 @@ int main(int argc, char *argv[]) {
 		{
 			.type = CT_LINE_LINE_ANGLE,
 			.v = M_PI/2,
-			.c1 = &line.perp2,
-			.c2 = &line.l2,
+			.c1 = &line.l2,
+			.c2 = &line.perp2,
 		},
 		{
 			.type = CT_POINT_LINE_DISTANCE,
@@ -1330,6 +1355,11 @@ candidate_found:
 	// plot_generic(*bend[4].e);
 	plot_arc_between(line.corner_center.e->point, line.corner_end.e->point, line.corner_start.e->point);
 	// plot_generic(*bend[8].e);
+	// plot_generic(*line.perp2.e);
+	// plot_generic(*line.l2.e);
+	// plot_generic(*line.l2.e);
+	// plot_angle(components[3].e->line, line.l1.e->line, 90);
+	// plot_angle(line.l2.e->line, line.perp2.e->line, -90);
 
 	if(true) {
 		for(size_t i = 0; i < sizeof(constraints)/sizeof(constraints[0]); i++) {
