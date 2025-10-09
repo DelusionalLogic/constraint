@@ -7,6 +7,8 @@
 
 #define TEXT_OFFSET 0.4
 
+#define SETSIGN(b, v) ((v) * ((2 * (b)) - 1));
+
 enum operation {
 	CMD_VALUE_INPUT,
 	CMD_ORIGIN,
@@ -173,7 +175,7 @@ void plot_line_style(struct line l, enum LineStyle style) {
 		printf("<line %s x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\" />\n", style_str, minx, -miny, maxx, -maxy);
 	}
 
-	if(LSTYLE_NORMAL) {
+	if(style == LSTYLE_NORMAL) {
 		double d0 = glm_vec2_norm2(l.norm);
 
 		vec2 p0 = {0, 0};
@@ -576,6 +578,7 @@ void execute_drawing(struct drawing *drawing, double inputs[]) {
 				glm_vec2_copy(current->arg1->line.norm, current->result.line.norm);
 				double mag = glm_vec2_norm(current->result.line.norm);
 				if(current->root == 1) mag = -mag;
+				// printf("Magnitude is %f %f\n", mag, current->arg2->value);
 				current->result.line.C = current->arg1->line.C - mag * current->arg2->value;
 			}break;
 			case CMD_LINE_CIRCLE_CIRCLE_TANGENT: {
@@ -773,6 +776,13 @@ char *constraint_type_name[] = {
 	[CT_LINE_LINE_ANGLE] = "Line Line Angle",
 };
 
+#define SEARCH_DEPTH 16
+
+struct path_step {
+	uint64_t i;
+	bool direction;
+};
+
 struct constraint {
 	enum constraint_type type;
 	double v;
@@ -781,6 +791,8 @@ struct constraint {
 	struct component *c2;
 
 	uint64_t order;
+	struct path_step path[SEARCH_DEPTH];
+	bool forward;
 	bool used;
 };
 
@@ -802,6 +814,37 @@ void add_frontier(struct frontier *frontier, struct component *component) {
 	frontier->elems[frontier->n++] = component;
 }
 
+void build_angle_point_line(struct drawing *drawing, struct component *local_i, struct component *local_j, struct component *oppo_i) {
+	assert(local_i->type == COM_LINE);
+	assert(local_j->type == COM_POINT);
+	struct element *theta = insert_cmd(drawing, (struct command){
+		.op = CMD_VALUE_INPUT,
+		.result.type = ETYPE_VALUE,
+	});
+
+	struct element *d = insert_cmd(drawing, (struct command){
+		.op = CMD_VALUE_INPUT,
+		.result.type = ETYPE_VALUE,
+	});
+
+	struct element* l = insert_cmd(drawing, (struct command){
+		.op = CMD_LINE_POINT_LINE_ANGLE,
+		.hidden = true,
+		.result.type = ETYPE_LINE,
+		.arg1 = local_j->e,
+		.arg2 = local_i->e,
+		.arg3 = theta,
+	});
+
+	oppo_i->e = insert_cmd(drawing, (struct command){
+		.op = CMD_LINE_LINE_DISTANCE_PARALLEL,
+		.hidden = true,
+		.result.type = ETYPE_LINE,
+		.arg1 = l,
+		.arg2 = d,
+	});
+}
+
 struct smooth_line {
 	struct component l1;
 	struct component l2;
@@ -817,6 +860,92 @@ struct smooth_line {
 	struct component corner_start;
 	struct component corner_end;
 };
+
+struct box {
+	struct component corner[4];
+	struct component side[4];
+};
+
+struct angle_search_frame {
+	size_t constraint_i;
+	struct component *head;
+	bool dir;
+};
+
+bool find_angle(struct constraint *constraints, size_t constraints_num, struct component *first_component, struct component *needle, struct path_step *path) {
+	struct angle_search_frame frames[SEARCH_DEPTH];
+	struct angle_search_frame *frame = frames;
+
+	frame->constraint_i = 0;
+	frame->head = first_component;
+
+	bool *checked = calloc(sizeof(bool), constraints_num);
+
+	while(frame >= frames) {
+		assert(frame < frames + SEARCH_DEPTH);
+		assert(frame >= frames);
+
+		assert(frame->constraint_i <= constraints_num);
+		if(frame->constraint_i == constraints_num) {
+#if 0
+			printf("Dead end at: ");
+			for(struct angle_search_frame *i = frames; i <= frame; i++) {
+				printf("%ld -> ", i->constraint_i);
+			}
+			printf("\n");
+#endif
+			frame--;
+			frame->constraint_i++;
+			continue;
+		}
+
+		if(checked[frame->constraint_i]) {
+			frame->constraint_i++;
+			continue;
+		}
+
+		struct constraint *constraint = &constraints[frame->constraint_i];
+		if(constraint->type != CT_LINE_LINE_ANGLE) {
+			frame->constraint_i++;
+			continue;
+		}
+
+		struct component *other;
+
+		if(constraint->c1 == frame->head) {
+			other = constraint->c2;
+			frame->dir = true;
+		} else if(constraint->c2 == frame->head) {
+			other = constraint->c1;
+			frame->dir = false;
+		} else {
+			frame->constraint_i++;
+			continue;
+		}
+
+		if(other == needle) {
+			// printf("Found path %p %p: ", first_component, needle);
+			for(struct angle_search_frame *i = frames; i <= frame; i++) {
+				path[i - frames].i = i->constraint_i;
+				path[i - frames].direction = i->dir;
+				// printf("%ld [%d] [%p] -> ", i->constraint_i, i->dir, i->head);
+			}
+			// printf("\n");
+			if(frame < frames + SEARCH_DEPTH-1) {
+				path[frame - frames + 1].i = -1;
+			}
+			return true;
+		}
+
+		checked[frame->constraint_i] = true;
+
+		frame++;
+		frame->constraint_i = 0;
+		frame->head = other;
+	}
+
+	return false;
+}
 
 int main(int argc, char *argv[]) {
 	// struct element *line_start;
@@ -852,6 +981,21 @@ int main(int argc, char *argv[]) {
 
 		.corner_start = {.type = COM_POINT},
 		.corner_end = {.type = COM_POINT},
+	};
+
+	struct box box = {
+		.corner = {
+			{.type = COM_POINT},
+			{.type = COM_POINT},
+			{.type = COM_POINT},
+			{.type = COM_POINT},
+		},
+		.side = {
+			{.type = COM_LINE},
+			{.type = COM_LINE},
+			{.type = COM_LINE},
+			{.type = COM_LINE},
+		},
 	};
 
 	struct constraint constraints[] = {
@@ -925,7 +1069,7 @@ int main(int argc, char *argv[]) {
 
 		{
 			.type = CT_LINE_LINE_ANGLE,
-			.v = -M_PI/2,
+			.v = M_PI/2,
 			.c1 = &line.l2,
 			.c2 = &line.l1,
 		},
@@ -1026,11 +1170,119 @@ int main(int argc, char *argv[]) {
 			.c1 = &line.corner_end,
 			.c2 = &line.l2,
 		},
+
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &box.corner[0],
+			.c2 = &box.side[0],
+		},
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &box.corner[1],
+			.c2 = &box.side[0],
+		},
+
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &box.corner[1],
+			.c2 = &box.side[1],
+		},
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &box.corner[2],
+			.c2 = &box.side[1],
+		},
+
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &box.corner[2],
+			.c2 = &box.side[2],
+		},
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &box.corner[3],
+			.c2 = &box.side[2],
+		},
+
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &box.corner[3],
+			.c2 = &box.side[3],
+		},
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &box.corner[0],
+			.c2 = &box.side[3],
+		},
+
+		{
+			.type = CT_LINE_LINE_ANGLE,
+			.v = M_PI/2,
+			.c1 = &box.side[3],
+			.c2 = &box.side[0],
+		},
+		{
+			.type = CT_LINE_LINE_ANGLE,
+			.v = M_PI/2,
+			.c1 = &box.side[1],
+			.c2 = &box.side[2],
+		},
+		{
+			.type = CT_LINE_LINE_ANGLE,
+			.v = M_PI/2,
+			.c1 = &box.side[2],
+			.c2 = &box.side[3],
+		},
+		{
+			.type = CT_LINE_LINE_ANGLE,
+			.v = M_PI*1/2,
+			.c1 = &components[3],
+			.c2 = &box.side[1],
+		},
+
+		{
+			.type = CT_POINT_POINT_DISTANCE,
+			.v = 10,
+			.c1 = &line.corner_start,
+			.c2 = &box.corner[0],
+		},
+		{
+			.type = CT_POINT_POINT_DISTANCE,
+			.v = 10,
+			.c1 = &line.corner_end,
+			.c2 = &box.corner[0],
+		},
+
+		{
+			.type = CT_POINT_POINT_DISTANCE,
+			.v = 20,
+			.c1 = &box.corner[0],
+			.c2 = &box.corner[1],
+		},
+		{
+			.type = CT_POINT_POINT_DISTANCE,
+			.v = 10,
+			.c1 = &box.corner[1],
+			.c2 = &box.corner[2],
+		},
 	};
 
 	struct frontier frontier = {};
 	struct drawing drawing = {};
 	uint64_t order = 1;
+
+	for(size_t i = 0; i < sizeof(constraints)/sizeof(constraints[0]); i++) {
+		constraints[i].path[0].i = -1;
+		constraints[i].forward = true;
+	}
 
 	// Step 1 Pick some point point distance constraint as the base
 	for(size_t i = 0; i < sizeof(constraints)/sizeof(constraints[0]); i++) {
@@ -1108,7 +1360,21 @@ int main(int argc, char *argv[]) {
 					local_j = constraints[j].c2;
 				} else continue;
 
-				if(oppo_i != oppo_j) continue;
+				// One of the constraints can't be an angle one
+				if(constraints[i].type == CT_LINE_LINE_ANGLE && constraints[j].type == CT_LINE_LINE_ANGLE) continue;
+
+				if(oppo_i != oppo_j) {
+					if(constraints[i].type == CT_LINE_LINE_ANGLE) {
+						if(!find_angle(constraints, sizeof(constraints)/sizeof(constraints[0]), oppo_i, oppo_j, constraints[i].path)) continue;
+
+						oppo_i = oppo_j;
+					} else if(constraints[j].type == CT_LINE_LINE_ANGLE) {
+						if(!find_angle(constraints, sizeof(constraints)/sizeof(constraints[0]), oppo_j, oppo_i, constraints[j].path)) continue;
+
+						oppo_j = oppo_i;
+					} else continue;
+				}
+
 
 				// printf("Detected %ld %ld\n", i, j);
 
@@ -1233,32 +1499,27 @@ int main(int argc, char *argv[]) {
 					&& local_j->type == COM_POINT) {
 					assert(oppo_i->type == COM_LINE);
 
-					struct element *theta = insert_cmd(&drawing, (struct command){
-						.op = CMD_VALUE_INPUT,
-						.result.type = ETYPE_VALUE,
-					});
+					constraints[i].forward = constraints[i].c1 == local_i;
+					build_angle_point_line(&drawing, local_i, local_j, oppo_i);
+				} else if(constraints[i].type == CT_POINT_LINE_DISTANCE
+					&& local_i->type == COM_POINT
+					&& constraints[j].type == CT_LINE_LINE_ANGLE
+					&& local_j->type == COM_LINE) {
+					assert(oppo_i->type == COM_LINE);
+					constraints[j].forward = constraints[j].c1 == local_j;
 
-					struct element *d = insert_cmd(&drawing, (struct command){
-						.op = CMD_VALUE_INPUT,
-						.result.type = ETYPE_VALUE,
-					});
+					// @HACK Swap the two constraints to reuse the construction
+					// steps. This sucks, and we need to figure out some better
+					// way of doing it.
+					struct component* tmp = local_i;
+					local_i = local_j;
+					local_j = tmp;
 
-					struct element* l = insert_cmd(&drawing, (struct command){
-						.op = CMD_LINE_POINT_LINE_ANGLE,
-						.hidden = true,
-						.result.type = ETYPE_LINE,
-						.arg1 = local_j->e,
-						.arg2 = local_i->e,
-						.arg3 = theta,
-					});
+					i ^= j;
+					j = j ^ i;
+					i ^= j;
 
-					oppo_i->e = insert_cmd(&drawing, (struct command){
-						.op = CMD_LINE_LINE_DISTANCE_PARALLEL,
-						.hidden = true,
-						.result.type = ETYPE_LINE,
-						.arg1 = l,
-						.arg2 = d,
-					});
+					build_angle_point_line(&drawing, local_i, local_j, oppo_i);
 				} else if(constraints[i].type == CT_POINT_LINE_DISTANCE
 					&& local_i->type == COM_LINE
 					&& constraints[j].type == CT_POINT_POINT_DISTANCE
@@ -1319,7 +1580,23 @@ candidate_found:
 
 	double *params = malloc(sizeof(double) * (sizeof(constraints)/sizeof(constraints[0])));
 	for(size_t i = 0; i < sizeof(constraints)/sizeof(constraints[0]); i++) {
-		params[constraints[i].order-1] = constraints[i].v;
+		if(constraints[i].order == 0) continue;
+
+		params[constraints[i].order-1] = SETSIGN(constraints[i].forward, constraints[i].v);
+
+		// We need to offset angles based on the path we took to use this
+		// constraint
+		if(constraints[i].path[0].i != -1) {
+			// printf("PATH %ld\n", i);
+			for(struct path_step *p = constraints[i].path; p <= constraints[i].path+SEARCH_DEPTH && p->i != -1; p++) {
+				params[constraints[i].order-1] += SETSIGN(p->direction, constraints[p->i].v);
+				// printf("%ld [%d:%f] [%f] -> ", p->i, p->direction, constraints[p->i].v, params[constraints[i].order-1]);
+			}
+			// printf("\n");
+			params[constraints[i].order-1] -= (M_PI*2.0) * floor(params[constraints[i].order-1] / (M_PI*2.0));
+			// printf("Final Angle is %f\n", params[constraints[i].order-1]);
+		}
+
 	}
 
 	execute_drawing(&drawing, params);
@@ -1346,6 +1623,15 @@ candidate_found:
 	plot_line_between(components[1].e->point, components[5].e->point);
 	plot_line_between(components[5].e->point, components[0].e->point);
 
+	// plot_line_between(line.corner_start.e->point, box.corner[0].e->point);
+	// printf("%f %f %f\n", box.side[0].e->line.norm[0], box.side[0].e->line.norm[1], box.side[0].e->line.C);
+	// printf("%f %f %f\n", components[3].e->line.norm[0], components[3].e->line.norm[1], components[3].e->line.C);
+	// plot_generic(*box.side[0].e);
+	plot_line_between(box.corner[0].e->point, box.corner[1].e->point);
+	plot_line_between(box.corner[1].e->point, box.corner[2].e->point);
+	plot_line_between(box.corner[2].e->point, box.corner[3].e->point);
+	plot_line_between(box.corner[3].e->point, box.corner[0].e->point);
+
 	plot_line_between(components[5].e->point, line.corner_start.e->point);
 	plot_line_between(line.corner_end.e->point, line.end.e->point);
 	// plot_generic(*bend[0].e);
@@ -1355,9 +1641,15 @@ candidate_found:
 	// plot_generic(*bend[4].e);
 	plot_arc_between(line.corner_center.e->point, line.corner_end.e->point, line.corner_start.e->point);
 	// plot_generic(*bend[8].e);
+	// plot_generic(*box.corner[0].e);
+	// plot_line_style(box.side[0].e->line, LSTYLE_NORMAL);
+	// plot_line_style(box.side[1].e->line, LSTYLE_NORMAL);
+	// plot_line_style(box.side[2].e->line, LSTYLE_NORMAL);
 	// plot_generic(*line.perp2.e);
+	// plot_generic(*line.l1.e);
+	// plot_generic(*components[3].e);
 	// plot_generic(*line.l2.e);
-	// plot_generic(*line.l2.e);
+	// plot_generic(*line.corner_center.e);
 	// plot_angle(components[3].e->line, line.l1.e->line, 90);
 	// plot_angle(line.l2.e->line, line.perp2.e->line, -90);
 
