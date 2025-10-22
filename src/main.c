@@ -1141,13 +1141,13 @@ int main(int argc, char *argv[]) {
 		},
 		{
 			.type = CT_POINT_POINT_DISTANCE,
-			.v = 10,
+			.v = 7,
 			.c1 = &components[1],
 			.c2 = &components[2],
 		},
 		{
 			.type = CT_POINT_POINT_DISTANCE,
-			.v = 10,
+			.v = 7,
 			.c1 = &components[2],
 			.c2 = &components[0],
 		},
@@ -1360,8 +1360,8 @@ int main(int argc, char *argv[]) {
 		{
 			.type = CT_LINE_LINE_ANGLE,
 			.v = M_PI/2,
-			.c1 = &box.side[3],
-			.c2 = &box.side[0],
+			.c1 = &box.side[0],
+			.c2 = &box.side[3],
 		},
 		{
 			.type = CT_LINE_LINE_ANGLE,
@@ -1371,9 +1371,9 @@ int main(int argc, char *argv[]) {
 		},
 		{
 			.type = CT_LINE_LINE_ANGLE,
-			.v = M_PI/2,
-			.c1 = &box.side[2],
-			.c2 = &box.side[3],
+			.v = M_PI/2.9,
+			.c1 = &box.side[3],
+			.c2 = &box.side[2],
 		},
 		{
 			.type = CT_LINE_LINE_ANGLE,
@@ -1384,14 +1384,14 @@ int main(int argc, char *argv[]) {
 
 		{
 			.type = CT_POINT_POINT_DISTANCE,
-			.v = 10,
-			.c1 = &line.corner_start,
+			.v = 9.5,
+			.c1 = &line.corner_end,
 			.c2 = &box.corner[0],
 		},
 		{
 			.type = CT_POINT_POINT_DISTANCE,
 			.v = 10,
-			.c1 = &line.corner_end,
+			.c1 = &line.corner_start,
 			.c2 = &box.corner[0],
 		},
 
@@ -1449,6 +1449,7 @@ int main(int argc, char *argv[]) {
 	if(drawing.error != NULL) {
 		plot_generic(*drawing.error->arg1);
 		plot_generic(*drawing.error->arg2);
+		fprintf(stderr, "Solver error detected. Drawing will be incomplete\n");
 	}
 
 	// plot_line_between(components[0].e->point, components[1].e->point);

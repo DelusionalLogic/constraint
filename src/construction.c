@@ -126,8 +126,8 @@ void execute_drawing(struct drawing *drawing, double inputs[]) {
 
 				if(current->arg1->circle.radius == 0 && current->arg2->circle.radius == 0) {
 					// The tangent is just a line through the two centers
-					// @FAST: This is wasteful. If the the procedure too the
-					// two vectors directly, we wouldn't have to copy here.
+					// @FAST: This is wasteful. If the procedure took the two
+					// vectors directly, we wouldn't have to copy here.
 					struct point p1;
 					glm_vec2_copy(current->arg1->circle.center, p1.pos);
 					struct point p2;
@@ -156,7 +156,8 @@ void execute_drawing(struct drawing *drawing, double inputs[]) {
 			}break;
 			case CMD_POINT_CIRCLE_CIRCLE: {
 				assert(current->result.type == ETYPE_POINT);
-				vec2 between_centers; glm_vec2_sub(current->arg1->circle.center, current->arg2->circle.center, between_centers);
+				vec2 between_centers;
+				glm_vec2_sub(current->arg1->circle.center, current->arg2->circle.center, between_centers);
 				glm_vec2_mul(between_centers, (vec2){2, 2}, between_centers);
 				double a = between_centers[0];
 				double b = between_centers[1];
