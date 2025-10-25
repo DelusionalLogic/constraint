@@ -588,8 +588,8 @@ void extend_line_to(struct component* c, struct point *p) {
 		c->min = val;
 		c->max = val;
 	} else {
-		c->min = fmin(c->min, val);
-		c->max = fmax(c->max, val);
+		c->min = fmin(c->min, val - 0.1);
+		c->max = fmax(c->max, val + 0.1);
 	}
 }
 
@@ -693,6 +693,17 @@ struct smooth_line {
 struct box {
 	struct component corner[4];
 	struct component side[4];
+};
+
+struct mid {
+	struct component l1;
+	struct component l2;
+
+	struct component x1;
+
+	struct component p1;
+
+	struct component p;
 };
 
 struct angle_search_frame {
@@ -1132,6 +1143,17 @@ int main(int argc, char *argv[]) {
 		},
 	};
 
+	struct mid box_enter = {
+		.l1 = {.type = COM_LINE},
+		.l2 = {.type = COM_LINE},
+
+		.x1 = {.type = COM_POINT},
+
+		.p1 = {.type = COM_LINE},
+
+		.p = {.type = COM_POINT},
+	};
+
 	struct constraint constraints[] = {
 		{
 			.type = CT_POINT_POINT_DISTANCE,
@@ -1386,13 +1408,13 @@ int main(int argc, char *argv[]) {
 			.type = CT_POINT_POINT_DISTANCE,
 			.v = 9.5,
 			.c1 = &line.corner_end,
-			.c2 = &box.corner[0],
+			.c2 = &box_enter.p,
 		},
 		{
 			.type = CT_POINT_POINT_DISTANCE,
 			.v = 10,
 			.c1 = &line.corner_start,
-			.c2 = &box.corner[0],
+			.c2 = &box_enter.p,
 		},
 
 		{
@@ -1401,12 +1423,83 @@ int main(int argc, char *argv[]) {
 			.c1 = &box.corner[0],
 			.c2 = &box.corner[1],
 		},
+
+		{
+			.type = CT_LINE_LINE_ANGLE,
+			.v = M_PI/4,
+			.c1 = &box.side[0],
+			.c2 = &box_enter.l1,
+		},
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &box.corner[0],
+			.c2 = &box_enter.l1,
+		},
+		{
+			.type = CT_LINE_LINE_ANGLE,
+			.v = M_PI/4,
+			.c1 = &box.side[3],
+			.c2 = &box_enter.l2,
+		},
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &box.corner[3],
+			.c2 = &box_enter.l2,
+		},
+
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &box_enter.l1,
+			.c2 = &box_enter.x1,
+		},
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &box_enter.l2,
+			.c2 = &box_enter.x1,
+		},
+
+		{
+			.type = CT_LINE_LINE_ANGLE,
+			.v = M_PI/2,
+			.c1 = &box.side[3],
+			.c2 = &box_enter.p1,
+		},
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &box_enter.x1,
+			.c2 = &box_enter.p1,
+		},
+
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &box_enter.p,
+			.c2 = &box.side[3],
+		},
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &box_enter.p1,
+			.c2 = &box_enter.p,
+		},
+
 		{
 			.type = CT_POINT_POINT_DISTANCE,
 			.v = 10,
-			.c1 = &box.corner[1],
-			.c2 = &box.corner[2],
+			.c1 = &box.corner[3],
+			.c2 = &box_enter.p,
 		},
+		// {
+		// 	.type = CT_POINT_LINE_DISTANCE,
+		// 	.v = 0,
+		// 	.c1 = &box.corner[0],
+		// 	.c2 = &components[3],
+		// },
 	};
 
 	struct drawing drawing = {};
@@ -1476,6 +1569,7 @@ int main(int argc, char *argv[]) {
 	// plot_generic(*bend[4].e);
 	plot_arc_between(line.corner_center.e->point, line.corner_end.e->point, line.corner_start.e->point);
 	// plot_generic(*bend[8].e);
+	plot_generic(*box_enter.p.e);
 	// plot_generic(*box.corner[0].e);
 	// plot_line_style(box.side[0].e->line, LSTYLE_NORMAL);
 	// plot_line_style(box.side[1].e->line, LSTYLE_NORMAL);
