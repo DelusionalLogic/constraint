@@ -573,6 +573,8 @@ struct component {
 
 	struct element *e;
 
+	bool show_when_placed;
+
 	double min;
 	double max;
 	bool min_max_init;
@@ -658,7 +660,7 @@ void build_angle_point_line(struct drawing *drawing, struct component *local_i, 
 
 	struct element* l = insert_cmd(drawing, (struct command){
 		.op = CMD_LINE_POINT_LINE_ANGLE,
-		.hidden = true,
+		.hidden = !oppo_i->show_when_placed,
 		.result.type = ETYPE_LINE,
 		.arg1 = local_j->e,
 		.arg2 = local_i->e,
@@ -667,7 +669,7 @@ void build_angle_point_line(struct drawing *drawing, struct component *local_i, 
 
 	oppo_i->e = insert_cmd(drawing, (struct command){
 		.op = CMD_LINE_LINE_DISTANCE_PARALLEL,
-		.hidden = true,
+		.hidden = !oppo_i->show_when_placed,
 		.result.type = ETYPE_LINE,
 		.arg1 = l,
 		.arg2 = d,
@@ -889,6 +891,8 @@ void solve_constraints(struct constraint *constraints, size_t constraints_num, s
 
 
 				// printf("Detected %ld %ld\n", i, j);
+				
+				bool shown = oppo_i->show_when_placed;
 
 				if(constraints[i].type == CT_POINT_POINT_DISTANCE
 					&& local_i->type == COM_POINT
@@ -908,7 +912,7 @@ void solve_constraints(struct constraint *constraints, size_t constraints_num, s
 
 					struct element *c1 = insert_cmd(drawing, (struct command){
 						.op = CMD_CIRCLE_CENTER_RADIUS,
-						.hidden = true,
+						.hidden = !shown,
 						.result.type = ETYPE_CIRCLE,
 						.arg1 = local_i->e,
 						.arg2 = d1,
@@ -916,7 +920,7 @@ void solve_constraints(struct constraint *constraints, size_t constraints_num, s
 
 					struct element *c2 = insert_cmd(drawing, (struct command){
 						.op = CMD_CIRCLE_CENTER_RADIUS,
-						.hidden = true,
+						.hidden = !shown,
 						.result.type = ETYPE_CIRCLE,
 						.arg1 = local_j->e,
 						.arg2 = d2,
@@ -924,7 +928,7 @@ void solve_constraints(struct constraint *constraints, size_t constraints_num, s
 
 					oppo_i->e = insert_cmd(drawing, (struct command){
 						.op = CMD_POINT_CIRCLE_CIRCLE,
-						.hidden = true,
+						.hidden = !shown,
 						.result.type = ETYPE_POINT,
 						.arg1 = c1,
 						.arg2 = c2,
@@ -946,7 +950,7 @@ void solve_constraints(struct constraint *constraints, size_t constraints_num, s
 
 					struct element *c1 = insert_cmd(drawing, (struct command){
 						.op = CMD_CIRCLE_CENTER_RADIUS,
-						.hidden = true,
+						.hidden = !shown,
 						.result.type = ETYPE_CIRCLE,
 						.arg1 = local_i->e,
 						.arg2 = d1,
@@ -954,7 +958,7 @@ void solve_constraints(struct constraint *constraints, size_t constraints_num, s
 
 					struct element *c2 = insert_cmd(drawing, (struct command){
 						.op = CMD_CIRCLE_CENTER_RADIUS,
-						.hidden = true,
+						.hidden = !shown,
 						.result.type = ETYPE_CIRCLE,
 						.arg1 = local_j->e,
 						.arg2 = d2,
@@ -962,7 +966,7 @@ void solve_constraints(struct constraint *constraints, size_t constraints_num, s
 
 					oppo_i->e = insert_cmd(drawing, (struct command){
 						.op = CMD_LINE_CIRCLE_CIRCLE_TANGENT,
-						.hidden = true,
+						.hidden = !shown,
 						.result.type = ETYPE_LINE,
 						.arg1 = c1,
 						.arg2 = c2,
@@ -984,7 +988,7 @@ void solve_constraints(struct constraint *constraints, size_t constraints_num, s
 
 					struct element *l1 = insert_cmd(drawing, (struct command){
 						.op = CMD_LINE_LINE_DISTANCE_PARALLEL,
-						.hidden = true,
+						.hidden = !shown,
 						.result.type = ETYPE_LINE,
 						.arg1 = local_i->e,
 						.arg2 = d1,
@@ -992,7 +996,7 @@ void solve_constraints(struct constraint *constraints, size_t constraints_num, s
 
 					struct element *l2 = insert_cmd(drawing, (struct command){
 						.op = CMD_LINE_LINE_DISTANCE_PARALLEL,
-						.hidden = true,
+						.hidden = !shown,
 						.result.type = ETYPE_LINE,
 						.arg1 = local_j->e,
 						.arg2 = d2,
@@ -1000,7 +1004,7 @@ void solve_constraints(struct constraint *constraints, size_t constraints_num, s
 
 					oppo_i->e = insert_cmd(drawing, (struct command){
 						.op = CMD_POINT_LINE_LINE,
-						.hidden = true,
+						.hidden = !shown,
 						.result.type = ETYPE_POINT,
 						.arg1 = l1,
 						.arg2 = l2,
@@ -1049,7 +1053,7 @@ void solve_constraints(struct constraint *constraints, size_t constraints_num, s
 
 					struct element *l = insert_cmd(drawing, (struct command){
 						.op = CMD_LINE_LINE_DISTANCE_PARALLEL,
-						.hidden = true,
+						.hidden = !shown,
 						.result.type = ETYPE_LINE,
 						.arg1 = local_i->e,
 						.arg2 = d1,
@@ -1057,7 +1061,7 @@ void solve_constraints(struct constraint *constraints, size_t constraints_num, s
 
 					struct element *c = insert_cmd(drawing, (struct command){
 						.op = CMD_CIRCLE_CENTER_RADIUS,
-						.hidden = true,
+						.hidden = !shown,
 						.result.type = ETYPE_CIRCLE,
 						.arg1 = local_j->e,
 						.arg2 = d2,
@@ -1065,7 +1069,8 @@ void solve_constraints(struct constraint *constraints, size_t constraints_num, s
 
 					oppo_i->e = insert_cmd(drawing, (struct command){
 						.op = CMD_POINT_CIRCLE_LINE,
-						.hidden = true,
+						.hidden = !shown,
+						.root = constraints[j].c2 == local_j,
 						.result.type = ETYPE_POINT,
 						.arg1 = c,
 						.arg2 = l,
@@ -1369,19 +1374,19 @@ int main(int argc, char *argv[]) {
 		{
 			.type = CT_POINT_LINE_DISTANCE,
 			.v = 0,
-			.c1 = &box.corner[3],
+			.c1 = &box.corner[0],
 			.c2 = &box.side[3],
 		},
 		{
 			.type = CT_POINT_LINE_DISTANCE,
 			.v = 0,
-			.c1 = &box.corner[0],
+			.c1 = &box.corner[3],
 			.c2 = &box.side[3],
 		},
 
 		{
 			.type = CT_LINE_LINE_ANGLE,
-			.v = M_PI/2,
+			.v = M_PI+M_PI/2,
 			.c1 = &box.side[0],
 			.c2 = &box.side[3],
 		},
@@ -1393,7 +1398,7 @@ int main(int argc, char *argv[]) {
 		},
 		{
 			.type = CT_LINE_LINE_ANGLE,
-			.v = M_PI/2.9,
+			.v = M_PI+M_PI/2.9,
 			.c1 = &box.side[3],
 			.c2 = &box.side[2],
 		},
@@ -1409,12 +1414,14 @@ int main(int argc, char *argv[]) {
 			.v = 9.5,
 			.c1 = &line.corner_end,
 			.c2 = &box_enter.p,
+			// .c2 = &box.corner[0],
 		},
 		{
 			.type = CT_POINT_POINT_DISTANCE,
 			.v = 10,
 			.c1 = &line.corner_start,
 			.c2 = &box_enter.p,
+			// .c2 = &box.corner[0],
 		},
 
 		{
@@ -1488,18 +1495,18 @@ int main(int argc, char *argv[]) {
 			.c2 = &box_enter.p,
 		},
 
-		{
-			.type = CT_POINT_POINT_DISTANCE,
-			.v = 10,
-			.c1 = &box.corner[3],
-			.c2 = &box_enter.p,
-		},
 		// {
-		// 	.type = CT_POINT_LINE_DISTANCE,
-		// 	.v = 0,
-		// 	.c1 = &box.corner[0],
-		// 	.c2 = &components[3],
+		// 	.type = CT_POINT_POINT_DISTANCE,
+		// 	.v = 10,
+		// 	.c1 = &box_enter.p,
+		// 	.c2 = &box.corner[0],
 		// },
+		{
+			.type = CT_POINT_LINE_DISTANCE,
+			.v = 0,
+			.c1 = &box.corner[0],
+			.c2 = &components[3],
+		},
 	};
 
 	struct drawing drawing = {};
@@ -1514,10 +1521,10 @@ int main(int argc, char *argv[]) {
 		// We need to offset angles based on the path we took to use this
 		// constraint
 		if(constraints[i].path[0].i != -1) {
-			// printf("PATH %ld\n", i);
+			// printf("PATH %ld order %llu\n", i, constraints[i].order-1);
 			for(struct path_step *p = constraints[i].path; p <= constraints[i].path+SEARCH_DEPTH && p->i != -1; p++) {
 				params[constraints[i].order-1] += SETSIGN(p->direction, constraints[p->i].v);
-				// printf("%ld [%d:%f] [%f] -> ", p->i, p->direction, constraints[p->i].v, params[constraints[i].order-1]);
+				// printf("%llu [%d:%f] [%f] -> ", p->i, p->direction, constraints[p->i].v, params[constraints[i].order-1]);
 			}
 			// printf("\n");
 			params[constraints[i].order-1] -= (M_PI*2.0) * floor(params[constraints[i].order-1] / (M_PI*2.0));
@@ -1569,8 +1576,10 @@ int main(int argc, char *argv[]) {
 	// plot_generic(*bend[4].e);
 	plot_arc_between(line.corner_center.e->point, line.corner_end.e->point, line.corner_start.e->point);
 	// plot_generic(*bend[8].e);
-	plot_generic(*box_enter.p.e);
+	// plot_generic(*box_enter.p.e);
 	// plot_generic(*box.corner[0].e);
+	// plot_generic(*box.side[0].e);
+	// plot_generic(*box_enter.l1.e);
 	// plot_line_style(box.side[0].e->line, LSTYLE_NORMAL);
 	// plot_line_style(box.side[1].e->line, LSTYLE_NORMAL);
 	// plot_line_style(box.side[2].e->line, LSTYLE_NORMAL);
