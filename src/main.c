@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <cglm/cglm.h>
 #include <string.h>
+#include <limits.h>
 
 #include "cad/construction.h"
 #include "cad/solve.h"
@@ -14,6 +15,148 @@
 #define SIGNOF(x) ((typeof(x))((x)>0) - ((x)<0))
 
 #define DEG(x) ((x) * M_PI / 180.0)
+
+enum topology_op {
+	TOPO_MOVETO,
+	TOPO_LINETO,
+	TOPO_ARCTO,
+
+	TOPO_END,
+};
+
+struct topology_cmd {
+	enum topology_op op;
+};
+
+struct topology_arg {
+	struct component *c;
+};
+
+struct topology_elem {
+	union {
+		struct topology_cmd cmd;
+		struct topology_arg arg;
+	};
+};
+
+#define MOVETO(c) \
+	{ .cmd = {TOPO_MOVETO} }, \
+	{ .arg = {c} } \
+
+#define LINETO(c) \
+	{ .cmd = {TOPO_LINETO} }, \
+	{ .arg = {c} } \
+
+#define ARCTO(center, end) \
+	{ .cmd = {TOPO_ARCTO} }, \
+	{ .arg = {center} }, \
+	{ .arg = {end} } \
+
+#define END() \
+	{ .cmd = {TOPO_END} } \
+
+struct topology {
+	struct topology_elem *elements;
+	size_t length;
+	size_t capacity;
+};
+
+static void resize_buffer(void **buffer, size_t *capacity, size_t elems, size_t elemSize) {
+	assert(elems > 0);
+	uint64_t newpower = (sizeof(elems) * CHAR_BIT) - __builtin_clzl(elems-1);
+	elems = 1 << newpower;
+
+	if(elems != *capacity) {
+		*capacity = elems;
+		*buffer = realloc(*buffer, *capacity * elemSize);
+	}
+}
+
+static void topo_resize(struct topology *topo, uint64_t newcapacity) {
+	resize_buffer((void**)&topo->elements, &topo->capacity, newcapacity, sizeof(struct topology_elem));
+}
+
+size_t frag_len(struct topology_elem *elems) {
+	struct topology_elem *cur = elems;
+	while(cur->cmd.op != TOPO_END) {
+		switch(cur->cmd.op) {
+			case TOPO_MOVETO:
+				cur += 2;
+				break;
+			case TOPO_LINETO:
+				cur += 2;
+				break;
+			case TOPO_ARCTO:
+				cur += 3;
+				break;
+			case TOPO_END:
+				abort();
+		}
+	}
+
+	return cur - elems;
+}
+
+void add_topo_fragment(struct topology *topo, struct topology_elem *new) {
+	size_t new_num = frag_len(new);
+	if(new_num + topo->length > topo->capacity) {
+		topo_resize(topo, new_num + topo->length);
+	}
+
+	memcpy(topo->elements + topo->length, new, new_num * sizeof(struct topology_elem));
+	topo->length += new_num;
+}
+
+#define PP_DISTANCE(C1, C2, D) \
+	{ \
+		.type = CT_POINT_POINT_DISTANCE, \
+		.v = D, \
+		.c1 = C1, \
+		.c2 = C2, \
+	}
+
+#define PL_DISTANCE(C1, C2, D) \
+	{ \
+		.type = CT_POINT_LINE_DISTANCE, \
+		.v = D, \
+		.c1 = C1, \
+		.c2 = C2, \
+	}
+
+#define POINT_ON_LINE(C1, C2) \
+	PL_DISTANCE(C1, C2, 0)
+
+#define LL_ANGLE(C1, C2, D) \
+	{ \
+		.type = CT_LINE_LINE_ANGLE, \
+		.v = D, \
+		.c1 = C1, \
+		.c2 = C2, \
+	}
+
+#define CEND() \
+	{ \
+		.type = CT_END, \
+	}
+
+struct constraints {
+	struct constraint *elements;
+	size_t length;
+	size_t capacity;
+};
+
+void add_constraint(struct constraints *c, struct constraint *new) {
+	struct constraint *end = new;
+	while(end->type != CT_END) end++;
+	size_t new_num = end - new;
+
+	if(c->length + new_num > c->capacity) {
+		resize_buffer((void**)&c->elements, &c->capacity, c->length + new_num, sizeof(struct constraint));
+	}
+
+	memcpy(c->elements + c->length, new, new_num * sizeof(struct constraint));
+	c->length += new_num;
+}
 
 double project_point_to_line_distance(struct point p, struct line l) {
 	vec2 offset = {-p.pos[0], -p.pos[1]};
@@ -610,10 +753,44 @@ struct smooth_line {
 	struct component corner_end;
 };
 
+struct smooth_line init_smooth_line() {
+	return  (struct smooth_line){
+		.l1 = {.type = COM_LINE},
+		.l2 = {.type = COM_LINE},
+		.corner = {.type = COM_POINT},
+		.corner_center = {.type = COM_POINT},
+		.end = {.type = COM_POINT},
+		.start = {.type = COM_POINT},
+
+		.perp1 = {.type = COM_LINE},
+		.perp2 = {.type = COM_LINE},
+
+		.corner_start = {.type = COM_POINT},
+		.corner_end = {.type = COM_POINT},
+	};
+}
+
 struct box {
 	struct component corner[4];
 	struct component side[4];
 };
+
+struct box init_box() {
+	return (struct box){
+		.corner = {
+			{.type = COM_POINT},
+			{.type = COM_POINT},
+			{.type = COM_POINT},
+			{.type = COM_POINT},
+		},
+		.side = {
+			{.type = COM_LINE},
+			{.type = COM_LINE},
+			{.type = COM_LINE},
+			{.type = COM_LINE},
+		},
+	};
+}
 
 struct mid {
 	struct component l1;
@@ -626,6 +803,19 @@ struct mid {
 	struct component p;
 };
 
+struct mid init_mid() {
+	return (struct mid) {
+		.l1 = {.type = COM_LINE},
+		.l2 = {.type = COM_LINE},
+
+		.x1 = {.type = COM_POINT},
+
+		.p1 = {.type = COM_LINE},
+
+		.p = {.type = COM_POINT},
+	};
+}
+
 int main(int argc, char *argv[]) {
 	// struct element *line_start;
 	// struct element *line_bend_start;
@@ -637,6 +827,9 @@ int main(int argc, char *argv[]) {
 	// create_drawing(&drawing, &line_start, &line_bend_start, &line_ctr, &line_bend_end, &line_end);
 	// execute_drawing(&drawing, (double[]){8, M_PI * 0.5, M_PI * 0.4, .3});
 
+	struct constraints constraints = {0};
+	struct topology topo = {0};
+
 	// Figure 4
 	struct component components[] = {
 		{.type = COM_POINT},
@@ -647,421 +840,148 @@ int main(int argc, char *argv[]) {
 		{.type = COM_POINT},
 	};
 
-	struct smooth_line line = {
-		.l1 = {.type = COM_LINE},
-		.l2 = {.type = COM_LINE},
-		.corner = {.type = COM_POINT, .show_when_placed=false},
-		.corner_center = {.type = COM_POINT},
-		.end = {.type = COM_POINT, .show_when_placed=false},
-		.start = {.type = COM_POINT},
+	add_topo_fragment(&topo, (struct topology_elem[]){
+		MOVETO(&components[1]),
+		LINETO(&components[5]),
+		LINETO(&components[0]),
+		LINETO(&components[2]),
+		LINETO(&components[1]),
 
-		.perp1 = {.type = COM_LINE},
-		.perp2 = {.type = COM_LINE},
+		END(),
+	});
 
-		.corner_start = {.type = COM_POINT},
-		.corner_end = {.type = COM_POINT},
-	};
+	add_constraint(&constraints, (struct constraint[]){
+		PP_DISTANCE(&components[0], &components[1], 13),
+		PP_DISTANCE(&components[1], &components[2], 7),
+		PP_DISTANCE(&components[2], &components[0], 7),
 
-	struct box box = {
-		.corner = {
-			{.type = COM_POINT, .show_when_placed=false},
-			{.type = COM_POINT},
-			{.type = COM_POINT, .show_when_placed=false},
-			{.type = COM_POINT},
-		},
-		.side = {
-			{.type = COM_LINE, .show_when_placed=false},
-			{.type = COM_LINE, .show_when_placed=false},
-			{.type = COM_LINE},
-			{.type = COM_LINE},
-		},
-	};
+		POINT_ON_LINE(&components[0], &components[3]),
+		POINT_ON_LINE(&components[1], &components[3]),
 
-	struct mid box_enter = {
-		.l1 = {.type = COM_LINE},
-		.l2 = {.type = COM_LINE},
+		LL_ANGLE(&components[3], &components[4], M_PI/1.7),
 
-		.x1 = {.type = COM_POINT},
+		POINT_ON_LINE(&components[4], &components[1]),
+		POINT_ON_LINE(&components[4], &components[5]),
 
-		.p1 = {.type = COM_LINE},
+		PP_DISTANCE(&components[0], &components[5], 12.8),
+		CEND(),
+	});
 
-		.p = {.type = COM_POINT},
-	};
+	struct smooth_line line = init_smooth_line();
 
-	struct constraint constraints[] = {
-		{
-			.type = CT_POINT_POINT_DISTANCE,
-			.v = 13,
-			.c1 = &components[0],
-			.c2 = &components[1],
-		},
-		{
-			.type = CT_POINT_POINT_DISTANCE,
-			.v = 7,
-			.c1 = &components[1],
-			.c2 = &components[2],
-		},
-		{
-			.type = CT_POINT_POINT_DISTANCE,
-			.v = 7,
-			.c1 = &components[2],
-			.c2 = &components[0],
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &components[0],
-			.c2 = &components[3],
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &components[1],
-			.c2 = &components[3],
-		},
-		{
-			.type = CT_LINE_LINE_ANGLE,
-			.v = M_PI/1.7,
-			.c1 = &components[3],
-			.c2 = &components[4],
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &components[4],
-			.c2 = &components[1],
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &components[4],
-			.c2 = &components[5],
-		},
-		{
-			.type = CT_POINT_POINT_DISTANCE,
-			.v = 12.8,
-			.c1 = &components[0],
-			.c2 = &components[5],
-		},
+	add_topo_fragment(&topo, (struct topology_elem[]){
+		MOVETO(&components[5]),
+		LINETO(&line.corner_start),
+		ARCTO(&line.corner_center, &line.corner_end),
+		LINETO(&line.end),
 
-		{
-			.type = CT_LINE_LINE_ANGLE,
-			.v = M_PI/2,
-			.c1 = &components[3],
-			.c2 = &line.l1,
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &components[5],
-			.c2 = &line.l1,
-		},
+		END(),
+	});
 
-		{
-			.type = CT_LINE_LINE_ANGLE,
-			.v = M_PI/2,
-			.c1 = &line.l2,
-			.c2 = &line.l1,
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &line.corner,
-			.c2 = &line.l2,
-		},
+	add_constraint(&constraints, (struct constraint[]){
+		LL_ANGLE(&components[3], &line.l1, DEG(90)),
+		POINT_ON_LINE(&components[5], &line.l1),
 
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &line.corner,
-			.c2 = &line.l1,
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &line.end,
-			.c2 = &line.l2,
-		},
+		LL_ANGLE(&line.l2, &line.l1, DEG(90)),
+		POINT_ON_LINE(&line.corner, &line.l1),
+		POINT_ON_LINE(&line.corner, &line.l2),
 
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 10,
-			.c1 = &line.end,
-			.c2 = &line.l1,
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 12,
-			.c1 = &line.end,
-			.c2 = &components[3],
-		},
+		POINT_ON_LINE(&line.end, &line.l2),
+		PL_DISTANCE(&line.end, &line.l1, 10),
+		PL_DISTANCE(&line.end, &components[3], 12),
 
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 1,
-			.c1 = &line.corner_center,
-			.c2 = &line.l1,
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = -1,
-			.c1 = &line.corner_center,
-			.c2 = &line.l2,
-		},
+		PL_DISTANCE(&line.corner_center, &line.l1, 2),
+		PL_DISTANCE(&line.corner_center, &line.l2, -2),
 
-		{
-			.type = CT_LINE_LINE_ANGLE,
-			.v = M_PI/2,
-			.c1 = &line.l1,
-			.c2 = &line.perp1,
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &line.corner_center,
-			.c2 = &line.perp1,
-		},
+		LL_ANGLE(&line.l1, &line.perp1, DEG(90)),
+		POINT_ON_LINE(&line.corner_center, &line.perp1),
+		POINT_ON_LINE(&line.corner_start, &line.perp1),
+		POINT_ON_LINE(&line.corner_start, &line.l1),
 
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &line.corner_start,
-			.c2 = &line.perp1,
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &line.corner_start,
-			.c2 = &line.l1,
-		},
+		LL_ANGLE(&line.l2, &line.perp2, DEG(90)),
+		POINT_ON_LINE(&line.corner_center, &line.perp2),
+		POINT_ON_LINE(&line.corner_end, &line.perp2),
+		POINT_ON_LINE(&line.corner_end, &line.l2),
 
-		{
-			.type = CT_LINE_LINE_ANGLE,
-			.v = M_PI/2,
-			.c1 = &line.l2,
-			.c2 = &line.perp2,
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &line.corner_center,
-			.c2 = &line.perp2,
-		},
+		CEND(),
+	});
 
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &line.corner_end,
-			.c2 = &line.perp2,
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &line.corner_end,
-			.c2 = &line.l2,
-		},
+	struct box box = init_box();
+	add_topo_fragment(&topo, (struct topology_elem[]){
+		MOVETO(&box.corner[0]),
+		LINETO(&box.corner[1]),
+		LINETO(&box.corner[2]),
+		LINETO(&box.corner[3]),
+		LINETO(&box.corner[0]),
 
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &box.corner[0],
-			.c2 = &box.side[0],
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &box.corner[1],
-			.c2 = &box.side[0],
-		},
+		END(),
+	});
 
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &box.corner[1],
-			.c2 = &box.side[1],
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &box.corner[2],
-			.c2 = &box.side[1],
-		},
+	add_constraint(&constraints, (struct constraint[]){
+		POINT_ON_LINE(&box.corner[0], &box.side[0]),
+		POINT_ON_LINE(&box.corner[1], &box.side[0]),
 
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &box.corner[2],
-			.c2 = &box.side[2],
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &box.corner[3],
-			.c2 = &box.side[2],
-		},
+		POINT_ON_LINE(&box.corner[1], &box.side[1]),
+		POINT_ON_LINE(&box.corner[2], &box.side[1]),
 
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &box.corner[0],
-			.c2 = &box.side[3],
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &box.corner[3],
-			.c2 = &box.side[3],
-		},
+		POINT_ON_LINE(&box.corner[2], &box.side[2]),
+		POINT_ON_LINE(&box.corner[3], &box.side[2]),
 
-		{
-			.type = CT_LINE_LINE_ANGLE,
-			.v = M_PI/2,
-			.c1 = &box.side[3],
-			.c2 = &box.side[0],
-		},
-		{
-			.type = CT_LINE_LINE_ANGLE,
-			.v = M_PI/2,
-			.c1 = &box.side[1],
-			.c2 = &box.side[2],
-		},
-		{
-			.type = CT_LINE_LINE_ANGLE,
-			.v = M_PI/2,
-			.c1 = &box.side[2],
-			.c2 = &box.side[3],
-		},
-		{
-			.type = CT_LINE_LINE_ANGLE,
-			.v = M_PI*1/2,
-			.c1 = &components[3],
-			.c2 = &box.side[1],
-		},
+		POINT_ON_LINE(&box.corner[0], &box.side[3]),
+		POINT_ON_LINE(&box.corner[3], &box.side[3]),
 
-		{
-			.type = CT_POINT_POINT_DISTANCE,
-			.v = 9.5,
-			.c1 = &line.corner_end,
-			// .c2 = &box_enter.p,
-			.c2 = &box.corner[0],
-		},
-		{
-			.type = CT_POINT_POINT_DISTANCE,
-			.v = 10,
-			.c1 = &line.corner_start,
-			// .c2 = &box_enter.p,
-			.c2 = &box.corner[0],
-		},
+		LL_ANGLE(&box.side[3], &box.side[0], DEG(80)),
+		LL_ANGLE(&box.side[1], &box.side[2], DEG(100)),
+		LL_ANGLE(&box.side[1], &box.side[3], DEG(180)),
+		LL_ANGLE(&components[3], &box.side[1], DEG(90)),
 
-		{
-			.type = CT_POINT_POINT_DISTANCE,
-			.v = 20,
-			.c1 = &box.corner[0],
-			.c2 = &box.corner[1],
-		},
+		PL_DISTANCE(&box.side[1], &box.corner[0], 20),
 
-		{
-			.type = CT_LINE_LINE_ANGLE,
-			.v = DEG(-30),
-			.c1 = &box.side[3],
-			.c2 = &box_enter.l1,
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &box.corner[0],
-			.c2 = &box_enter.l1,
-		},
-		{
-			.type = CT_LINE_LINE_ANGLE,
-			.v = DEG(30),
-			.c1 = &box.side[3],
-			.c2 = &box_enter.l2,
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &box.corner[3],
-			.c2 = &box_enter.l2,
-		},
+		PP_DISTANCE(&line.corner_end, &box.corner[0], 9.5),
+		PP_DISTANCE(&line.corner_start, &box.corner[0], 10),
+		CEND(),
+	});
 
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &box_enter.l1,
-			.c2 = &box_enter.x1,
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &box_enter.l2,
-			.c2 = &box_enter.x1,
-		},
+	struct mid box_enter = init_mid();
 
-		{
-			.type = CT_LINE_LINE_ANGLE,
-			.v = M_PI/2,
-			.c1 = &box.side[3],
-			.c2 = &box_enter.p1,
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &box_enter.x1,
-			.c2 = &box_enter.p1,
-		},
+	add_constraint(&constraints, (struct constraint[]){
+		LL_ANGLE(&box.side[3], &box_enter.l1, DEG(-30)),
+		POINT_ON_LINE(&box.corner[0], &box_enter.l1),
+		LL_ANGLE(&box.side[3], &box_enter.l2, DEG(30)),
+		POINT_ON_LINE(&box.corner[3], &box_enter.l2),
 
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &box_enter.p,
-			.c2 = &box.side[3],
-		},
-		{
-			.type = CT_POINT_LINE_DISTANCE,
-			.v = 0,
-			.c1 = &box_enter.p1,
-			.c2 = &box_enter.p,
-		},
+		POINT_ON_LINE(&box_enter.l1, &box_enter.x1),
+		POINT_ON_LINE(&box_enter.l2, &box_enter.x1),
 
-		{
-			.type = CT_POINT_POINT_DISTANCE,
-			.v = 5,
-			.c1 = &box_enter.p,
-			.c2 = &box.corner[0],
-		},
-		// {
-		// 	.type = CT_POINT_LINE_DISTANCE,
-		// 	.v = 0,
-		// 	.c1 = &box.corner[0],
-		// 	.c2 = &components[3],
-		// },
-	};
+		LL_ANGLE(&box.side[3], &box_enter.p1, DEG(90)),
+
+		POINT_ON_LINE(&box_enter.x1, &box_enter.p1),
+		POINT_ON_LINE(&box_enter.p, &box.side[3]),
+		POINT_ON_LINE(&box_enter.p1, &box_enter.p),
+
+		PP_DISTANCE(&box_enter.p, &box.corner[0], 5),
+		CEND(),
+	});
 
 	struct drawing drawing = {};
-	solve_constraints(constraints, sizeof(constraints)/sizeof(constraints[0]), &drawing);
-	solve_constraints(constraints, sizeof(constraints)/sizeof(constraints[0]), &drawing);
-	solve_constraints(constraints, sizeof(constraints)/sizeof(constraints[0]), &drawing);
-	solve_constraints(constraints, sizeof(constraints)/sizeof(constraints[0]), &drawing);
-	solve_constraints(constraints, sizeof(constraints)/sizeof(constraints[0]), &drawing);
-	solve_constraints(constraints, sizeof(constraints)/sizeof(constraints[0]), &drawing);
+	solve_constraints(constraints.elements, constraints.length, &drawing);
 
-	double *params = malloc(sizeof(double) * (sizeof(constraints)/sizeof(constraints[0])));
-	for(size_t i = 0; i < sizeof(constraints)/sizeof(constraints[0]); i++) {
-		if(!constraints[i].used) continue;
+	double *params = malloc(sizeof(double) * (constraints.length));
+	for(size_t i = 0; i < constraints.length; i++) {
+		if(!constraints.elements[i].used) continue;
 
-		params[constraints[i].order-1] = SETSIGN(constraints[i].forward, constraints[i].v);
+		params[constraints.elements[i].order-1] = SETSIGN(constraints.elements[i].forward, constraints.elements[i].v);
 
 		// We need to offset angles based on the path we took to use this
 		// constraint
-		if(constraints[i].path[0].i != -1) {
+		if(constraints.elements[i].path[0].i != -1) {
 			// printf("PATH %ld order %llu\n", i, constraints[i].order-1);
-			for(struct path_step *p = constraints[i].path; p <= constraints[i].path+SEARCH_DEPTH && p->i != -1; p++) {
-				params[constraints[i].order-1] += SETSIGN(p->direction, constraints[p->i].v);
+			for(struct path_step *p = constraints.elements[i].path; p <= constraints.elements[i].path+SEARCH_DEPTH && p->i != -1; p++) {
+				params[constraints.elements[i].order-1] += SETSIGN(p->direction, constraints.elements[p->i].v);
 				// printf("%llu [%d:%f] [%f] -> ", p->i, p->direction, constraints[p->i].v, params[constraints[i].order-1]);
 			}
 			// printf("\n");
-			params[constraints[i].order-1] -= (M_PI*2.0) * floor(params[constraints[i].order-1] / (M_PI*2.0));
+			params[constraints.elements[i].order-1] -= (M_PI*2.0) * floor(params[constraints.elements[i].order-1] / (M_PI*2.0));
 			// printf("Final Angle is %f\n", params[constraints[i].order-1]);
 		}
 
@@ -1086,45 +1006,38 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "Solver error detected. Drawing will be incomplete\n");
 	}
 
-	// plot_line_between(components[0].e->point, components[1].e->point);
-	plot_line_between(components[1].e->point, components[2].e->point);
-	plot_line_between(components[2].e->point, components[0].e->point);
-	plot_line_between(components[1].e->point, components[5].e->point);
-	plot_line_between(components[5].e->point, components[0].e->point);
+	struct component *head = NULL;
+	for(size_t i = 0; i < topo.length; i++) {
+		struct topology_elem *cur = &topo.elements[i];
+		switch(cur->cmd.op) {
+			case TOPO_MOVETO:
+				cur++;
+				if(cur->arg.c->e != NULL) head = cur->arg.c;
+				break;
+			case TOPO_LINETO:
+				cur++;
+				if(cur->arg.c->e != NULL) {
+					plot_line_between(head->e->point, cur->arg.c->e->point);
+					head = cur->arg.c;
+				}
+				break;
+			case TOPO_ARCTO:
+				cur++;
+				if(cur->arg.c->e != NULL && (cur+1)->arg.c->e != NULL) {
+					plot_arc_between(cur->arg.c->e->point, (cur+1)->arg.c->e->point, head->e->point);
+					head = (cur+1)->arg.c;
+				}
+				break;
+			case TOPO_END:
+				abort();
+		}
+	}
 
 	// printf("%f %f %f\n", components[3].e->line.norm[0], components[3].e->line.norm[1], components[3].e->line.C);
-	plot_line_between(box.corner[0].e->point, box.corner[1].e->point);
-	plot_line_between(box.corner[1].e->point, box.corner[2].e->point);
-	plot_line_between(box.corner[2].e->point, box.corner[3].e->point);
-	plot_line_between(box.corner[3].e->point, box.corner[0].e->point);
-
-	plot_line_between(components[5].e->point, line.corner_start.e->point);
-	plot_line_between(line.corner_end.e->point, line.end.e->point);
-	// plot_generic(*bend[0].e);
-	// plot_generic(*bend[1].e);
-	// plot_generic(*bend[2].e);
-	// plot_generic(*bend[3].e);
-	// plot_generic(*bend[4].e);
-	plot_arc_between(line.corner_center.e->point, line.corner_end.e->point, line.corner_start.e->point);
-	// plot_generic(*bend[8].e);
-	// plot_generic(*box_enter.p.e);
-	// plot_generic(*box.corner[0].e);
-	// plot_generic(*box.side[1].e);
-	// plot_generic(*box_enter.l1.e);
-	// plot_line_style(box.side[0].e->line, LSTYLE_NORMAL);
-	// plot_line_style(box.side[1].e->line, LSTYLE_NORMAL);
-	// plot_line_style(box.side[2].e->line, LSTYLE_NORMAL);
-	// plot_generic(*line.perp2.e);
-	// plot_generic(*line.l1.e);
-	// plot_generic(*components[3].e);
-	// plot_generic(*line.l2.e);
-	// plot_generic(*line.corner_center.e);
-	// plot_angle(components[3].e->line, line.l1.e->line, 90);
-	// plot_angle(line.l2.e->line, line.perp2.e->line, -90);
 	
 	if(true) {
-		for(size_t i = 0; i < sizeof(constraints)/sizeof(constraints[0]); i++) {
-			struct constraint *constraint = &constraints[i];
+		for(size_t i = 0; i < constraints.length; i++) {
+			struct constraint *constraint = &constraints.elements[i];
 			if(!constraint->used) continue;
 
 			switch(constraint->type) {
@@ -1139,11 +1052,12 @@ int main(int argc, char *argv[]) {
 				} break;
 				case CT_POINT_LINE_DISTANCE:
 					break;
+				case CT_END: abort();
 			}
 		}
 
-		for(size_t i = 0; i < sizeof(constraints)/sizeof(constraints[0]); i++) {
-			struct constraint *constraint = &constraints[i];
+		for(size_t i = 0; i < constraints.length; i++) {
+			struct constraint *constraint = &constraints.elements[i];
 			if(!constraint->used) continue;
 
 			switch(constraint->type) {
@@ -1155,6 +1069,9 @@ int main(int argc, char *argv[]) {
 				case CT_LINE_LINE_ANGLE: {
 					assert(constraint->c1->type == COM_LINE);
 					assert(constraint->c2->type == COM_LINE);
+
+					// Check if it's more likely a "parallel" constraint
+					if(fabs(sin(constraint->v)) < 0.1) continue;
 
 					struct component *l1 = constraint->c1;
 					struct component *l2 = constraint->c2;
@@ -1170,10 +1087,10 @@ int main(int argc, char *argv[]) {
 					struct point intersect;
 					plot_angle(l1->e->line, l2->e->line, constraint->v, &intersect, &p1, &p2);
 
-					// extend_line_to(constraint->c1, &intersect);
-					// extend_line_to(constraint->c2, &intersect);
-					// extend_line_to(l1, &p1);
-					// extend_line_to(l2, &p2);
+					extend_line_to(constraint->c1, &intersect);
+					extend_line_to(constraint->c2, &intersect);
+					extend_line_to(l1, &p1);
+					extend_line_to(l2, &p2);
 				} break;
 				case CT_POINT_LINE_DISTANCE: {
 					struct component *line;
@@ -1188,15 +1105,22 @@ int main(int argc, char *argv[]) {
 					assert(point->type == COM_POINT);
 					assert(line->type == COM_LINE);
 
-					if(constraint->v == 0) {
-						// extend_line_to(line, &point->e->point);
+					if(constraint->v > 0) {
+						double dist = project_point_to_line_distance(point->e->point, line->e->line);
+						struct point closest;
+						line_distance_to_point(line->e->line, dist, &closest);
+
+						plot_distance_indicator(point->e->point, closest, constraint->v);
 					}
+
+					extend_line_to(line, &point->e->point);
 				} break;
+				case CT_END: abort();
 			}
 		}
 
-		for(size_t i = 0; i < sizeof(constraints)/sizeof(constraints[0]); i++) {
-			struct constraint *constraint = &constraints[i];
+		for(size_t i = 0; i < constraints.length; i++) {
+			struct constraint *constraint = &constraints.elements[i];
 			if(!constraint->used) continue;
 
 			switch(constraint->type) {
@@ -1224,6 +1148,7 @@ int main(int argc, char *argv[]) {
 				} break;
 				case CT_POINT_LINE_DISTANCE:
 					break;
+				case CT_END: abort();
 			}
 		}
 	}

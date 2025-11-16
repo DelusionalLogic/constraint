@@ -9,7 +9,7 @@ LIBS = -lm
 INCS = -Ithirdparty/cglm/include -Iinc/
 
 CFLAGS ?= -D_FORTIFY_SOURCE=2 -Wall -Werror -Wno-error=unused-variable -g -Og
-CFLAGS += -std=gnu11 -fms-extensions -flto
+CFLAGS += -std=gnu23 -fms-extensions -flto
 
 APP_MAIN_SOURCES = $(SRCDIR)/main.c
 APP_MAIN_OBJS = $(APP_MAIN_SOURCES:%.c=$(OBJDIR)/%.o)

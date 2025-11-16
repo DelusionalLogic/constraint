@@ -252,52 +252,43 @@ candidate_found:
 	return steps_i;
 }
 
-bool solve_constraints(struct constraint *constraints, size_t constraints_num, struct drawing *drawing) {
-	// Step 1 Pick some point point distance constraint as the base
-	size_t fix;
-	if(!fix_first(constraints, constraints_num, &fix)) {
-		return false;
+static void draw_solution(struct constraint *constraints, size_t fix, struct solve_step* steps, size_t steps_num, struct drawing *drawing) {
+	{
+		constraints[fix].c1->e = insert_cmd(drawing, (struct command){
+			.op = CMD_ORIGIN,
+			.hidden = true,
+			.result.type = ETYPE_POINT,
+		});
+
+		struct element *xaxis = insert_cmd(drawing, (struct command){
+			.op = CMD_LINE_X,
+			.hidden = true,
+			.result.type = ETYPE_LINE,
+		});
+
+		struct element *distance = insert_cmd(drawing, (struct command){
+			.op = CMD_VALUE_INPUT,
+			.result.type = ETYPE_VALUE,
+		});
+
+		struct element *c = insert_cmd(drawing, (struct command){
+			.op = CMD_CIRCLE_CENTER_RADIUS,
+			.hidden = true,
+			.result.type = ETYPE_CIRCLE,
+			.arg1 = constraints[fix].c1->e,
+			.arg2 = distance,
+		});
+
+		constraints[fix].c2->e = insert_cmd(drawing, (struct command){
+			.op = CMD_POINT_CIRCLE_LINE,
+			.hidden = true,
+			.result.type = ETYPE_POINT,
+			.arg1 = c,
+			.arg2 = xaxis,
+		});
 	}
 
-	// Build the root of the drawing
-	constraints[fix].c1->e = insert_cmd(drawing, (struct command){
-		.op = CMD_ORIGIN,
-		.hidden = true,
-		.result.type = ETYPE_POINT,
-	});
-
-	struct element *xaxis = insert_cmd(drawing, (struct command){
-		.op = CMD_LINE_X,
-		.hidden = true,
-		.result.type = ETYPE_LINE,
-	});
-
-	struct element *distance = insert_cmd(drawing, (struct command){
-		.op = CMD_VALUE_INPUT,
-		.result.type = ETYPE_VALUE,
-	});
-
-	struct element *c = insert_cmd(drawing, (struct command){
-		.op = CMD_CIRCLE_CENTER_RADIUS,
-		.hidden = true,
-		.result.type = ETYPE_CIRCLE,
-		.arg1 = constraints[fix].c1->e,
-		.arg2 = distance,
-	});
-
-	constraints[fix].c2->e = insert_cmd(drawing, (struct command){
-		.op = CMD_POINT_CIRCLE_LINE,
-		.hidden = true,
-		.result.type = ETYPE_POINT,
-		.arg1 = c,
-		.arg2 = xaxis,
-	});
-
-	struct solve_step *steps = malloc(sizeof(struct solve_step) * constraints_num);
-	size_t steps_num = build_triangles(constraints, constraints_num, fix, steps);
-
-	// printf("Solved in %ld steps\n", steps_num);
-
+	// Build the solution steps
 	for(struct solve_step *step = steps; step < (steps + steps_num); step++) {
 		struct component *local_i;
 		struct component *oppo_i;
@@ -514,6 +505,23 @@ bool solve_constraints(struct constraint *constraints, size_t constraints_num, s
 		}
 
 	}
+
+}
+
+bool solve_constraints(struct constraint *constraints, size_t constraints_num, struct drawing *drawing) {
+	// Step 1 Pick some point point distance constraint as the base
+	size_t fix;
+	if(!fix_first(constraints, constraints_num, &fix)) {
+		return false;
+	}
+
+	// Build triangles on that root
+	struct solve_step *steps = malloc(sizeof(struct solve_step) * constraints_num);
+	size_t steps_num = build_triangles(constraints, constraints_num, fix, steps);
+
+	// printf("Solved in %ld steps\n", steps_num);
+	
+	draw_solution(constraints, fix, steps, steps_num, drawing);
 
 	return true;
 }

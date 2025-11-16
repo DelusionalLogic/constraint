@@ -27,6 +27,8 @@ enum constraint_type {
 	CT_POINT_POINT_DISTANCE,
 	CT_POINT_LINE_DISTANCE,
 	CT_LINE_LINE_ANGLE,
+
+	CT_END,
 };
 
 struct path_step {
