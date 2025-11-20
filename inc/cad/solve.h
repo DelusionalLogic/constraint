@@ -22,6 +22,20 @@ struct component {
 	bool drawn;
 };
 
+struct alias {
+	struct component *alias;
+	struct component *target;
+};
+
+struct constraints {
+	struct constraint *elements;
+	size_t length;
+	size_t capacity;
+
+	struct alias aliases[16];
+	size_t aliases_num;
+};
+
 extern char *constraint_type_name[];
 enum constraint_type {
 	CT_POINT_POINT_DISTANCE,
@@ -49,4 +63,6 @@ struct constraint {
 	bool used;
 };
 
-bool solve_constraints(struct constraint *constraints, size_t constraints_num, struct drawing *drawing);
+void alias_point(struct constraints *c, struct component *alias, struct component *target);
+void add_constraint(struct constraints *c, struct constraint *new);
+bool solve_constraints(struct constraints *constraints, struct drawing *drawing);

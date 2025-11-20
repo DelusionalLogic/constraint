@@ -1,5 +1,8 @@
 #include "cad/solve.h"
 
+#include "cad/util.h"
+#include <string.h>
+
 #define SWAP(x, y) do { \
 		typeof(x) tmp = x; \
 		x = y; \
@@ -11,6 +14,31 @@ char *constraint_type_name[] = {
 	[CT_POINT_LINE_DISTANCE] = "Point Line Distance",
 	[CT_LINE_LINE_ANGLE] = "Line Line Angle",
 };
+
+void alias_point(struct constraints *c, struct component *alias, struct component *target) {
+	assert(alias->type == COM_POINT);
+	assert(target->type == COM_POINT);
+
+	assert(c->aliases_num < 16);
+
+	struct alias *new = &c->aliases[c->aliases_num++];
+	new->alias = alias;
+	new->target = target;
+}
+
+void add_constraint(struct constraints *c, struct constraint *new) {
+	struct constraint *end = new;
+	while(end->type != CT_END) end++;
+	size_t new_num = end - new;
+
+	if(c->length + new_num > c->capacity) {
+		resize_buffer((void**)&c->elements, &c->capacity, c->length + new_num, sizeof(struct constraint));
+	}
+
+	memcpy(c->elements + c->length, new, new_num * sizeof(struct constraint));
+	c->length += new_num;
+}
+
 
 // @IMPROVE: We should do something better than this. I don't really know what.
 struct frontier {
@@ -28,6 +56,7 @@ static bool frontier_scan(struct frontier *frontier, struct component *component
 
 static void add_frontier(struct frontier *frontier, struct component *component) {
 	assert(!frontier_scan(frontier, component));
+	assert(frontier->n < 64);
 	frontier->elems[frontier->n++] = component;
 }
 
@@ -152,10 +181,10 @@ struct solve_step {
 };
 
 static bool fix_first(struct constraint *constraints, size_t constraints_num, size_t *c) {
-
 	for(size_t i = 0; i < constraints_num; i++) {
 		if(constraints[i].used) continue;
 		if(constraints[i].type != CT_POINT_POINT_DISTANCE) continue;
+		if(constraints[i].v == 0.0) continue;
 
 		*c = i;
 		return true;
@@ -183,6 +212,34 @@ static size_t build_triangles(struct constraint *constraints, size_t constraints
 	size_t steps_i = 0;
 
 	while(true) {
+		for(size_t i = 0; i < constraints_num; i++) {
+			if(constraints[i].used) continue;
+
+			if(constraints[i].type != CT_POINT_POINT_DISTANCE) continue;
+			if(constraints[i].v != 0.0) continue;
+
+			struct component *oppo;
+			bool forward;
+
+			if(frontier_scan(&frontier, constraints[i].c1)) {
+				oppo = constraints[i].c2;
+				forward = true;
+			} else if(frontier_scan(&frontier, constraints[i].c2)) {
+				oppo = constraints[i].c1;
+				forward = false;
+			} else continue;
+
+			add_frontier(&frontier, oppo);
+			constraints[i].order = 0;
+			constraints[i].used = true;
+
+			steps[steps_i].i = i;
+			steps[steps_i].j = i;
+			steps[steps_i].i_forward = forward;
+			steps[steps_i].j_forward = forward;
+			steps_i++;
+		}
+
 		for(size_t i = 0; i < constraints_num; i++) {
 			if(constraints[i].used) continue;
 
@@ -331,39 +388,44 @@ static void draw_solution(struct constraint *constraints, size_t fix, struct sol
 			&& local_j->type == COM_POINT) {
 			assert(oppo_i->type == COM_POINT);
 
-			struct element *d1 = insert_cmd(drawing, (struct command){
-				.op = CMD_VALUE_INPUT,
-				.result.type = ETYPE_VALUE,
-			});
+			if(step->i == step->j) {
+				assert(constraints[step->i].v == 0);
+				oppo_i->e = local_i->e;
+			} else {
+				struct element *d1 = insert_cmd(drawing, (struct command){
+					.op = CMD_VALUE_INPUT,
+					.result.type = ETYPE_VALUE,
+				});
 
-			struct element *d2 = insert_cmd(drawing, (struct command){
-				.op = CMD_VALUE_INPUT,
-				.result.type = ETYPE_VALUE,
-			});
+				struct element *d2 = insert_cmd(drawing, (struct command){
+					.op = CMD_VALUE_INPUT,
+					.result.type = ETYPE_VALUE,
+				});
 
-			struct element *c1 = insert_cmd(drawing, (struct command){
-				.op = CMD_CIRCLE_CENTER_RADIUS,
-				.hidden = !shown,
-				.result.type = ETYPE_CIRCLE,
-				.arg1 = local_i->e,
-				.arg2 = d1,
-			});
+				struct element *c1 = insert_cmd(drawing, (struct command){
+					.op = CMD_CIRCLE_CENTER_RADIUS,
+					.hidden = !shown,
+					.result.type = ETYPE_CIRCLE,
+					.arg1 = local_i->e,
+					.arg2 = d1,
+				});
 
-			struct element *c2 = insert_cmd(drawing, (struct command){
-				.op = CMD_CIRCLE_CENTER_RADIUS,
-				.hidden = !shown,
-				.result.type = ETYPE_CIRCLE,
-				.arg1 = local_j->e,
-				.arg2 = d2,
-			});
+				struct element *c2 = insert_cmd(drawing, (struct command){
+					.op = CMD_CIRCLE_CENTER_RADIUS,
+					.hidden = !shown,
+					.result.type = ETYPE_CIRCLE,
+					.arg1 = local_j->e,
+					.arg2 = d2,
+				});
 
-			oppo_i->e = insert_cmd(drawing, (struct command){
-				.op = CMD_POINT_CIRCLE_CIRCLE,
-				.hidden = !shown,
-				.result.type = ETYPE_POINT,
-				.arg1 = c1,
-				.arg2 = c2,
-			});
+				oppo_i->e = insert_cmd(drawing, (struct command){
+					.op = CMD_POINT_CIRCLE_CIRCLE,
+					.hidden = !shown,
+					.result.type = ETYPE_POINT,
+					.arg1 = c1,
+					.arg2 = c2,
+				});
+			}
 		} else if(constraints[step->i].type == CT_POINT_LINE_DISTANCE
 			&& local_i->type == COM_POINT
 			&& constraints[step->j].type == CT_POINT_LINE_DISTANCE
@@ -508,20 +570,38 @@ static void draw_solution(struct constraint *constraints, size_t fix, struct sol
 
 }
 
-bool solve_constraints(struct constraint *constraints, size_t constraints_num, struct drawing *drawing) {
-	// Step 1 Pick some point point distance constraint as the base
+bool solve_constraints(struct constraints *constraints, struct drawing *drawing) {
+	// Replace all the aliased points with the point they point to
+	for(size_t i = 0; i < constraints->aliases_num; i++) {
+		struct alias *alias = &constraints->aliases[i];
+
+		for(size_t j = 0; j < constraints->length; j++) {
+			struct constraint *it = &constraints->elements[j];
+			if(it->c1 == alias->alias) it->c1 = alias->target;
+			if(it->c2 == alias->alias) it->c2 = alias->target;
+		}
+	}
+
+	// Pick some point point distance constraint as the base
 	size_t fix;
-	if(!fix_first(constraints, constraints_num, &fix)) {
+	if(!fix_first(constraints->elements, constraints->length, &fix)) {
 		return false;
 	}
 
 	// Build triangles on that root
-	struct solve_step *steps = malloc(sizeof(struct solve_step) * constraints_num);
-	size_t steps_num = build_triangles(constraints, constraints_num, fix, steps);
+	struct solve_step *steps = malloc(sizeof(struct solve_step) * constraints->length);
+	size_t steps_num = build_triangles(constraints->elements, constraints->length, fix, steps);
 
 	// printf("Solved in %ld steps\n", steps_num);
 	
-	draw_solution(constraints, fix, steps, steps_num, drawing);
+	draw_solution(constraints->elements, fix, steps, steps_num, drawing);
+
+	// Fill out the aliased points out with the values from their targets
+	for(size_t i = 0; i < constraints->aliases_num; i++) {
+		struct alias *alias = &constraints->aliases[i];
+
+		memcpy(alias->alias, alias->target, sizeof(struct component));
+	}
 
 	return true;
 }

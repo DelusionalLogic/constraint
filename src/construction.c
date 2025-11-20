@@ -155,6 +155,8 @@ void execute_drawing(struct drawing *drawing, double inputs[]) {
 				circle_line_intersect(current->arg1->circle, current->arg2->line, current->root, &current->result.point);
 			}break;
 			case CMD_POINT_CIRCLE_CIRCLE: {
+				assert(current->arg1->type == ETYPE_CIRCLE);
+				assert(current->arg2->type == ETYPE_CIRCLE);
 				assert(current->result.type == ETYPE_POINT);
 				vec2 between_centers;
 				glm_vec2_sub(current->arg1->circle.center, current->arg2->circle.center, between_centers);
