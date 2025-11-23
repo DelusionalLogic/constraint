@@ -321,26 +321,11 @@ int main(int argc, char *argv[]) {
 	struct drawing drawing = {};
 	solve_constraints(&constraints, &drawing);
 
+	// Copy over all the parameter values to a new array
+	// @PERF: Maybe we should just store them in a separate array to start with
 	double *params = malloc(sizeof(double) * (constraints.length));
 	for(size_t i = 0; i < constraints.length; i++) {
-		if(!constraints.elements[i].used) continue;
-		if(constraints.elements[i].order == 0) continue;
-
-		params[i] = SETSIGN(constraints.elements[i].forward, constraints.elements[i].v);
-
-		// We need to offset angles based on the path we took to use this
-		// constraint
-		if(constraints.elements[i].path[0].i != -1) {
-			// printf("PATH %ld order %llu\n", i, constraints[i].order-1);
-			for(struct path_step *p = constraints.elements[i].path; p <= constraints.elements[i].path+SEARCH_DEPTH && p->i != -1; p++) {
-				params[i] += SETSIGN(p->direction, constraints.elements[p->i].v);
-				// printf("%llu [%d:%f] [%f] -> ", p->i, p->direction, constraints[p->i].v, params[constraints[i].order-1]);
-			}
-			// printf("\n");
-			params[i] -= (M_PI*2.0) * floor(params[i] / (M_PI*2.0));
-			// printf("Final Angle is %f\n", params[constraints[i].order-1]);
-		}
-
+		params[i] = constraints.elements[i].v;
 	}
 
 	execute_drawing(&drawing, params);

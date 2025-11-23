@@ -66,13 +66,20 @@ struct element* insert_cmd(struct drawing *drawing, struct command cmd) {
 	return &new->result;
 }
 
+#define SETSIGN(b, v) ((v) * ((2 * (b)) - 1))
 
 void execute_drawing(struct drawing *drawing, double inputs[]) {
 	for(struct command *current = drawing->root; current != NULL; current = current->next) {
 		switch(current->op) {
 			case CMD_VALUE_INPUT: {
 				assert(current->result.type == ETYPE_VALUE);
-				current->result.value = inputs[current->index];
+				current->result.value = SETSIGN(current->dir, inputs[current->index]);
+			}break;
+			case CMD_OFFSET_INPUT: {
+				assert(current->arg1->type == ETYPE_VALUE);
+				assert(current->result.type == ETYPE_VALUE);
+				current->result.value = current->arg1->value + SETSIGN(current->dir, inputs[current->index]);
+				current->result.value -= (M_PI*2.0) * floor(current->result.value / (M_PI*2.0));
 			}break;
 			case CMD_ORIGIN: {
 				assert(current->result.type == ETYPE_POINT);

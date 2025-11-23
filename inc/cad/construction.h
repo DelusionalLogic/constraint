@@ -3,6 +3,7 @@
 
 enum operation {
 	CMD_VALUE_INPUT,
+	CMD_OFFSET_INPUT,
 	CMD_ORIGIN,
 	CMD_LINE_X,
 	CMD_CIRCLE_CENTER_RADIUS,
@@ -56,7 +57,10 @@ struct command {
 	uint8_t root;
 	bool hidden;
 
+	// Only used for input commands
 	size_t index;
+	bool dir;
+
 	struct element *arg1;
 	struct element *arg2;
 	struct element *arg3;

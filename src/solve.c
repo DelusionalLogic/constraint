@@ -60,7 +60,7 @@ static void add_frontier(struct frontier *frontier, struct component *component)
 	frontier->elems[frontier->n++] = component;
 }
 
-static void build_angle_point_line(struct drawing *drawing, size_t index_i, size_t index_j, struct component *local_i, struct component *local_j, struct component *oppo_i) {
+static void build_angle_point_line(struct drawing *drawing, struct constraint *constraints, size_t index_i, size_t index_j, struct component *local_i, struct component *local_j, struct component *oppo_i) {
 	assert(local_i->e != NULL);
 	assert(local_j->e != NULL);
 	assert(local_i->type == COM_LINE);
@@ -68,12 +68,24 @@ static void build_angle_point_line(struct drawing *drawing, size_t index_i, size
 	struct element *theta = insert_cmd(drawing, (struct command){
 		.op = CMD_VALUE_INPUT,
 		.index = index_i,
+		.dir = constraints[index_i].forward,
 		.result.type = ETYPE_VALUE,
 	});
+
+	for(struct path_step *p = constraints[index_i].path; p <= constraints[index_i].path+SEARCH_DEPTH && p->i != -1; p++) {
+		theta = insert_cmd(drawing, (struct command){
+			.op = CMD_OFFSET_INPUT,
+			.arg1 = theta,
+			.index = p->i,
+			.dir = p->direction,
+			.result.type = ETYPE_VALUE,
+		});
+	}
 
 	struct element *d = insert_cmd(drawing, (struct command){
 		.op = CMD_VALUE_INPUT,
 		.index = index_j,
+		.dir = constraints[index_i].forward,
 		.result.type = ETYPE_VALUE,
 	});
 
@@ -325,6 +337,8 @@ static void draw_solution(struct constraint *constraints, size_t fix, struct sol
 
 		struct element *distance = insert_cmd(drawing, (struct command){
 			.op = CMD_VALUE_INPUT,
+			.index = 0,
+			.dir = constraints[fix].forward,
 			.result.type = ETYPE_VALUE,
 		});
 
@@ -395,12 +409,14 @@ static void draw_solution(struct constraint *constraints, size_t fix, struct sol
 				struct element *d1 = insert_cmd(drawing, (struct command){
 					.op = CMD_VALUE_INPUT,
 					.index = step->i,
+					.dir = constraints[step->i].forward,
 					.result.type = ETYPE_VALUE,
 				});
 
 				struct element *d2 = insert_cmd(drawing, (struct command){
 					.op = CMD_VALUE_INPUT,
 					.index = step->j,
+					.dir = constraints[step->j].forward,
 					.result.type = ETYPE_VALUE,
 				});
 
@@ -437,11 +453,13 @@ static void draw_solution(struct constraint *constraints, size_t fix, struct sol
 			struct element *d1 = insert_cmd(drawing, (struct command){
 				.op = CMD_VALUE_INPUT,
 				.index = step->i,
+				.dir = constraints[step->i].forward,
 				.result.type = ETYPE_VALUE,
 			});
 			struct element *d2 = insert_cmd(drawing, (struct command){
 				.op = CMD_VALUE_INPUT,
 				.index = step->j,
+				.dir = constraints[step->j].forward,
 				.result.type = ETYPE_VALUE,
 			});
 
@@ -477,11 +495,13 @@ static void draw_solution(struct constraint *constraints, size_t fix, struct sol
 			struct element *d1 = insert_cmd(drawing, (struct command){
 				.op = CMD_VALUE_INPUT,
 				.index = step->i,
+				.dir = constraints[step->i].forward,
 				.result.type = ETYPE_VALUE,
 			});
 			struct element *d2 = insert_cmd(drawing, (struct command){
 				.op = CMD_VALUE_INPUT,
 				.index = step->j,
+				.dir = constraints[step->j].forward,
 				.result.type = ETYPE_VALUE,
 			});
 
@@ -517,7 +537,7 @@ static void draw_solution(struct constraint *constraints, size_t fix, struct sol
 			constraints[step->i].forward = step->i_forward;
 			constraints[step->j].forward = step->j_forward;
 
-			build_angle_point_line(drawing, step->i, step->j, local_i, local_j, oppo_i);
+			build_angle_point_line(drawing, constraints, step->i, step->j, local_i, local_j, oppo_i);
 		} else if(constraints[step->i].type == CT_POINT_LINE_DISTANCE
 			&& local_i->type == COM_POINT
 			&& constraints[step->j].type == CT_LINE_LINE_ANGLE
@@ -527,7 +547,7 @@ static void draw_solution(struct constraint *constraints, size_t fix, struct sol
 			constraints[step->i].forward = step->i_forward;
 			constraints[step->j].forward = step->j_forward;
 
-			build_angle_point_line(drawing, step->j, step->i, local_j, local_i, oppo_i);
+			build_angle_point_line(drawing, constraints, step->j, step->i, local_j, local_i, oppo_i);
 		} else if(constraints[step->i].type == CT_POINT_LINE_DISTANCE
 			&& local_i->type == COM_LINE
 			&& constraints[step->j].type == CT_POINT_POINT_DISTANCE
@@ -537,11 +557,13 @@ static void draw_solution(struct constraint *constraints, size_t fix, struct sol
 			struct element *d1 = insert_cmd(drawing, (struct command){
 				.op = CMD_VALUE_INPUT,
 				.index = step->i,
+				.dir = constraints[step->i].forward,
 				.result.type = ETYPE_VALUE,
 			});
 			struct element *d2 = insert_cmd(drawing, (struct command){
 				.op = CMD_VALUE_INPUT,
 				.index = step->j,
+				.dir = constraints[step->j].forward,
 				.result.type = ETYPE_VALUE,
 			});
 
