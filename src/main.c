@@ -326,18 +326,18 @@ int main(int argc, char *argv[]) {
 		if(!constraints.elements[i].used) continue;
 		if(constraints.elements[i].order == 0) continue;
 
-		params[constraints.elements[i].order-1] = SETSIGN(constraints.elements[i].forward, constraints.elements[i].v);
+		params[i] = SETSIGN(constraints.elements[i].forward, constraints.elements[i].v);
 
 		// We need to offset angles based on the path we took to use this
 		// constraint
 		if(constraints.elements[i].path[0].i != -1) {
 			// printf("PATH %ld order %llu\n", i, constraints[i].order-1);
 			for(struct path_step *p = constraints.elements[i].path; p <= constraints.elements[i].path+SEARCH_DEPTH && p->i != -1; p++) {
-				params[constraints.elements[i].order-1] += SETSIGN(p->direction, constraints.elements[p->i].v);
+				params[i] += SETSIGN(p->direction, constraints.elements[p->i].v);
 				// printf("%llu [%d:%f] [%f] -> ", p->i, p->direction, constraints[p->i].v, params[constraints[i].order-1]);
 			}
 			// printf("\n");
-			params[constraints.elements[i].order-1] -= (M_PI*2.0) * floor(params[constraints.elements[i].order-1] / (M_PI*2.0));
+			params[i] -= (M_PI*2.0) * floor(params[i] / (M_PI*2.0));
 			// printf("Final Angle is %f\n", params[constraints[i].order-1]);
 		}
 
