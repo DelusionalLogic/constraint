@@ -50,19 +50,8 @@ void plot_point(struct point p) {
 	printf("<circle cx=\"%f\" cy=\"%f\" r=\".4\" fill=\"black\" />\n", p.pos[0], -p.pos[1]);
 }
 
-void plot_line_style(struct line l, enum LineStyle style) {
-	char *style_str;
-	switch(style) {
-		case LSTYLE_NORMAL:
-			style_str = "stroke=\"black\" stroke-width=\"0.2\"";
-			break;
-		case LSTYLE_CONSTRUCTION:
-			style_str = "stroke=\"blue\" stroke-width=\"0.1\" stroke-dasharray=\"0.7,0.2\" stroke-opacity=\"0.3\"";
-			break;
-		case LSTYLE_INDICATOR:
-			abort();
-			break;
-	}
+void plot_line(struct line l) {
+	char *style_str = "stroke=\"black\" stroke-width=\"0.2\"";
 	if(fabs(l.norm[0]) < fabs(l.norm[1])) {
 		double minx = -50;
 		double maxx =  50;
@@ -79,23 +68,16 @@ void plot_line_style(struct line l, enum LineStyle style) {
 		printf("<line %s x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\" />\n", style_str, minx, -miny, maxx, -maxy);
 	}
 
-	if(style == LSTYLE_NORMAL) {
-		double d0 = glm_vec2_norm2(l.norm);
+	double d0 = glm_vec2_norm2(l.norm);
 
-		vec2 p0 = {0, 0};
-		glm_vec2_mulsubs(l.norm, l.C, p0);
-		glm_vec2_divs(p0, d0, p0);
+	vec2 p0 = {0, 0};
+	glm_vec2_mulsubs(l.norm, l.C, p0);
+	glm_vec2_divs(p0, d0, p0);
 
-		vec2 p1;
-		glm_vec2_add(p0, l.norm, p1);
-		// printf("%f %f\n", l.norm[0], l.norm[1]);
+	vec2 p1;
+	glm_vec2_add(p0, l.norm, p1);
 
-		printf("<line x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\" stroke=\"black\" stroke-width=\".2\" />\n", p0[0], -p0[1], p1[0], -p1[1]);
-	}
-}
-
-void plot_line(struct line l) {
-	plot_line_style(l, LSTYLE_NORMAL);
+	printf("<line x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\" stroke=\"black\" stroke-width=\".2\" />\n", p0[0], -p0[1], p1[0], -p1[1]);
 }
 
 void plot_circle(struct circle c) {
@@ -198,10 +180,9 @@ struct mid init_mid() {
 }
 
 int main(int argc, char *argv[]) {
-	struct constraints constraints = {0};
-	struct topology topo = {0};
+	struct constraints constraints = {};
+	struct topology topo = {};
 
-	// Figure 4
 	struct component components[] = {
 		{.type = COM_POINT},
 		{.type = COM_POINT},
@@ -339,7 +320,6 @@ int main(int argc, char *argv[]) {
 
 	struct drawing drawing = {};
 	solve_constraints(&constraints, &drawing);
-	// line.start.e = components[5].e;
 
 	double *params = malloc(sizeof(double) * (constraints.length));
 	for(size_t i = 0; i < constraints.length; i++) {
@@ -365,53 +345,19 @@ int main(int argc, char *argv[]) {
 
 	execute_drawing(&drawing, params);
 
-	printf("<svg version=\"1.1\" viewBox=\"-50 -50 100 100\" width=\"1200\" height=\"1200\" xmlns=\"http://www.w3.org/2000/svg\">\n");
+	begin_drawing();
+	// for(struct command *current = drawing.root; current != NULL && current != drawing.error; current = current->next) {
+	// 	if(current->hidden) continue;
+	// 	plot_generic(current->result);
+	// }
 
-	// Axis lines
-	printf("<line x1=\"-1000\" y1=\"0\" x2=\"1000\" y2=\"0\" stroke=\"black\" stroke-width=\"0.1\" stroke-opacity=\"0.4\" />\n");
-	printf("<line y1=\"-1000\" x1=\"0\" y2=\"1000\" x2=\"0\" stroke=\"black\" stroke-width=\"0.1\" stroke-opacity=\"0.4\" />\n");
+	// if(drawing.error != NULL) {
+	// 	plot_generic(*drawing.error->arg1);
+	// 	plot_generic(*drawing.error->arg2);
+	// 	fprintf(stderr, "Solver error detected. Drawing will be incomplete\n");
+	// }
 
-	for(struct command *current = drawing.root; current != NULL && current != drawing.error; current = current->next) {
-		if(current->hidden) continue;
-		plot_generic(current->result);
-	}
-
-	if(drawing.error != NULL) {
-		plot_generic(*drawing.error->arg1);
-		plot_generic(*drawing.error->arg2);
-		fprintf(stderr, "Solver error detected. Drawing will be incomplete\n");
-	}
-
-	struct component *head = NULL;
-	for(size_t i = 0; i < topo.length; i++) {
-		struct topology_elem *cur = &topo.elements[i];
-		switch(cur->cmd.op) {
-			case TOPO_MOVETO:
-				cur++;
-				if(cur->arg.c->e != NULL) head = cur->arg.c;
-				break;
-			case TOPO_LINETO:
-				cur++;
-				if(cur->arg.c->e != NULL) {
-					plot_line_between(head->e->point, cur->arg.c->e->point);
-					head = cur->arg.c;
-				}
-				break;
-			case TOPO_ARCTO:
-				cur++;
-				if(cur->arg.c->e != NULL && (cur+1)->arg.c->e != NULL) {
-					plot_arc_between(cur->arg.c->e->point, (cur+1)->arg.c->e->point, head->e->point);
-					head = (cur+1)->arg.c;
-				}
-				break;
-			case TOPO_END:
-				abort();
-		}
-	}
-
-	// printf("%f %f %f\n", components[3].e->line.norm[0], components[3].e->line.norm[1], components[3].e->line.C);
-	
+	draw_topology(&topo);
 	draw_constraints(&constraints);
-
-	printf("</svg>\n");
+	end_drawing();
 }

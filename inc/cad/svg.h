@@ -7,6 +7,7 @@ enum LineStyle {
 	LSTYLE_NORMAL,
 	LSTYLE_CONSTRUCTION,
 	LSTYLE_INDICATOR,
+	LSTYLE_INDICATOR_INLINE,
 };
 #define TEXT_OFFSET 0.4
 
@@ -15,5 +16,7 @@ void plot_arc_between_style(struct point c, struct point p1, struct point p2, en
 void plot_arc_between(struct point c, struct point p1, struct point p2);
 void plot_text(struct point p, double angle, char* str);
 
+void begin_drawing();
 void draw_constraints(struct constraints *constraints);
 void draw_topology(struct topology *topo);
+void end_drawing();

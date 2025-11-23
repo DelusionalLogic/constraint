@@ -14,9 +14,12 @@ void plot_line_between_style(struct point p1, struct point p2, enum LineStyle st
 		case LSTYLE_INDICATOR:
 			style_str = "stroke=\"blue\" stroke-width=\"0.1\" stroke-opacity=\"0.3\"";
 			break;
+		case LSTYLE_INDICATOR_INLINE:
+			style_str = "stroke=\"blue\" stroke-width=\"0.1\" stroke-opacity=\"0.3\" marker-start=\"url(#triangle)\" marker-end=\"url(#triangle)\"";
+			break;
 	}
 
-	printf("<line %s x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\" />\n", style_str, p1.pos[0], -p1.pos[1], p2.pos[0], -p2.pos[1]);
+        printf("<line %s x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\" />\n", style_str, p1.pos[0], -p1.pos[1], p2.pos[0], -p2.pos[1]);
 }
 
 void plot_line_between(struct point p1, struct point p2) {
@@ -32,6 +35,7 @@ void plot_arc_between_style(struct point c, struct point p1, struct point p2, en
 		case LSTYLE_CONSTRUCTION:
 			abort();
 			break;
+		case LSTYLE_INDICATOR_INLINE:
 		case LSTYLE_INDICATOR:
 			style_str = "stroke=\"blue\" stroke-width=\"0.1\" stroke-opacity=\"0.3\"";
 			break;
@@ -103,9 +107,6 @@ void plot_angle(struct line l1, struct line l2, double theta, struct point *inte
 	char buf[512];
 	snprintf(buf, sizeof(buf), "%.1f°", theta);
 	plot_text(label_point, angle - M_PI/2, buf);
-
-	// plot_line_style(l1, LSTYLE_CONSTRUCTION);
-	// plot_line_style(l2, LSTYLE_CONSTRUCTION);
 }
 
 double project_point_to_line_distance(struct point p, struct line l) {
@@ -138,7 +139,7 @@ void extend_line_to(struct component* c, struct point *p) {
 	}
 }
 
-static void plot_distance_indicator(struct point p1, struct point p2, double distance) {
+static void plot_distance_indicator(struct point p1, struct point p2, double distance, bool offset) {
 	vec2 dir;
 	glm_vec2_sub(p2.pos, p1.pos, dir);
 	glm_vec2_normalize(dir);
@@ -147,27 +148,34 @@ static void plot_distance_indicator(struct point p1, struct point p2, double dis
 	struct point start;
 	struct point end;
 	{
-		glm_vec2_add(p1.pos, norm, start.pos);
-		glm_vec2_add(p2.pos, norm, end.pos);
-		plot_line_between_style(start, end, LSTYLE_INDICATOR);
+		if(offset) {
+			glm_vec2_add(p1.pos, norm, start.pos);
+			glm_vec2_add(p2.pos, norm, end.pos);
+		} else {
+			glm_vec2_copy(p1.pos, start.pos);
+			glm_vec2_copy(p2.pos, end.pos);
+		}
+		plot_line_between_style(start, end, offset ? LSTYLE_INDICATOR : LSTYLE_INDICATOR_INLINE);
 	}
 
-	// The little wings to highlight the ends
-	vec2 tip = {.3, .3};
-	glm_vec2_mul(norm, tip, tip);
-	{
-		struct point p1;
-		struct point p2;
-		glm_vec2_add(start.pos, tip, p1.pos);
-		glm_vec2_sub(start.pos, tip, p2.pos);
-		plot_line_between_style(p1, p2, LSTYLE_INDICATOR);
-	}
-	{
-		struct point p1;
-		struct point p2;
-		glm_vec2_add(end.pos, tip, p1.pos);
-		glm_vec2_sub(end.pos, tip, p2.pos);
-		plot_line_between_style(p1, p2, LSTYLE_INDICATOR);
+	if(offset) {
+		// The little wings to highlight the ends
+		vec2 tip = {.3, .3};
+		glm_vec2_mul(norm, tip, tip);
+		{
+			struct point p1;
+			struct point p2;
+			glm_vec2_add(start.pos, tip, p1.pos);
+			glm_vec2_sub(start.pos, tip, p2.pos);
+			plot_line_between_style(p1, p2, LSTYLE_INDICATOR);
+		}
+		{
+			struct point p1;
+			struct point p2;
+			glm_vec2_add(end.pos, tip, p1.pos);
+			glm_vec2_sub(end.pos, tip, p2.pos);
+			plot_line_between_style(p1, p2, LSTYLE_INDICATOR);
+		}
 	}
 
 	// The text
@@ -219,7 +227,10 @@ void draw_constraints(struct constraints *constraints) {
 				assert(constraint->c2->type == COM_POINT);
 				if(constraint->v == 0.0) continue;
 
-				plot_distance_indicator(constraint->c1->e->point, constraint->c2->e->point, constraint->v);
+				// @COMPL: It would be nice to combine the indicator and
+				// construction line if there's no topology line there
+				plot_line_between_style(constraint->c1->e->point, constraint->c2->e->point, LSTYLE_CONSTRUCTION);
+				plot_distance_indicator(constraint->c1->e->point, constraint->c2->e->point, constraint->v, true);
 			} break;
 			case CT_LINE_LINE_ANGLE: {
 				assert(constraint->c1->type == COM_LINE);
@@ -265,7 +276,10 @@ void draw_constraints(struct constraints *constraints) {
 					struct point closest;
 					line_distance_to_point(line->e->line, dist, &closest);
 
-					plot_distance_indicator(point->e->point, closest, constraint->v);
+					// @COMPL: It would be nice to combine the indicator and
+					// construction line if there's no topology line there
+					// plot_line_between_style(closest, point->e->point, LSTYLE_CONSTRUCTION);
+					plot_distance_indicator(point->e->point, closest, constraint->v, false);
 				}
 
 				extend_line_to(line, &point->e->point);
@@ -309,4 +323,47 @@ void draw_constraints(struct constraints *constraints) {
 }
 
 void draw_topology(struct topology *topo) {
+	struct component *head = NULL;
+	for(size_t i = 0; i < topo->length; i++) {
+		struct topology_elem *cur = &topo->elements[i];
+		switch(cur->cmd.op) {
+			case TOPO_MOVETO:
+				cur++;
+				if(cur->arg.c->e != NULL) head = cur->arg.c;
+				break;
+			case TOPO_LINETO:
+				cur++;
+				if(cur->arg.c->e != NULL) {
+					plot_line_between(head->e->point, cur->arg.c->e->point);
+					head = cur->arg.c;
+				}
+				break;
+			case TOPO_ARCTO:
+				cur++;
+				if(cur->arg.c->e != NULL && (cur+1)->arg.c->e != NULL) {
+					plot_arc_between(cur->arg.c->e->point, (cur+1)->arg.c->e->point, head->e->point);
+					head = (cur+1)->arg.c;
+				}
+				break;
+			case TOPO_END:
+				abort();
+		}
+	}
+}
+
+void begin_drawing() {
+	printf("<svg version=\"1.1\" viewBox=\"-50 -50 100 100\" width=\"1200\" height=\"1200\" xmlns=\"http://www.w3.org/2000/svg\">\n");
+	printf("<defs>\n");
+    printf("\t<marker id=\"triangle\" viewBox=\"0 0 10 10\" refX=\"10\" refY=\"5\" markerUnits=\"strokeWidth\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto-start-reverse\">\n");
+    printf("\t\t<path d=\"M 0 0 L 10 5 L 0 10 z\" fill=\"blue\" opacity=\"0.3\" />\n");
+    printf("\t</marker>\n");
+	printf("</defs>\n");
+
+	// Axis lines
+	printf("<line x1=\"-1000\" y1=\"0\" x2=\"1000\" y2=\"0\" stroke=\"black\" stroke-width=\"0.1\" stroke-opacity=\"0.4\" />\n");
+	printf("<line y1=\"-1000\" x1=\"0\" y2=\"1000\" x2=\"0\" stroke=\"black\" stroke-width=\"0.1\" stroke-opacity=\"0.4\" />\n");
+}
+
+void end_drawing() {
+	printf("</svg>\n");
 }
