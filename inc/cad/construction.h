@@ -56,6 +56,7 @@ struct command {
 	uint8_t root;
 	bool hidden;
 
+	size_t index;
 	struct element *arg1;
 	struct element *arg2;
 	struct element *arg3;

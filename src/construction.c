@@ -68,12 +68,11 @@ struct element* insert_cmd(struct drawing *drawing, struct command cmd) {
 
 
 void execute_drawing(struct drawing *drawing, double inputs[]) {
-	size_t input_i = 0;
 	for(struct command *current = drawing->root; current != NULL; current = current->next) {
 		switch(current->op) {
 			case CMD_VALUE_INPUT: {
 				assert(current->result.type == ETYPE_VALUE);
-				current->result.value = inputs[input_i++];
+				current->result.value = inputs[current->index];
 			}break;
 			case CMD_ORIGIN: {
 				assert(current->result.type == ETYPE_POINT);
