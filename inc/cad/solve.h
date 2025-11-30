@@ -45,6 +45,38 @@ enum constraint_type {
 	CT_END,
 };
 
+#define PP_DISTANCE(C1, C2, D) \
+	{ \
+		.type = CT_POINT_POINT_DISTANCE, \
+		.v = D, \
+		.c1 = C1, \
+		.c2 = C2, \
+	}
+
+#define PL_DISTANCE(C1, C2, D) \
+	{ \
+		.type = CT_POINT_LINE_DISTANCE, \
+		.v = D, \
+		.c1 = C1, \
+		.c2 = C2, \
+	}
+
+#define POINT_ON_LINE(C1, C2) \
+	PL_DISTANCE(C1, C2, 0)
+
+#define LL_ANGLE(C1, C2, D) \
+	{ \
+		.type = CT_LINE_LINE_ANGLE, \
+		.v = D, \
+		.c1 = C1, \
+		.c2 = C2, \
+	}
+
+#define CEND() \
+	{ \
+		.type = CT_END, \
+	}
+
 struct path_step {
 	uint64_t i;
 	bool direction;
@@ -66,3 +98,5 @@ struct constraint {
 void alias_point(struct constraints *c, struct component *alias, struct component *target);
 void add_constraint(struct constraints *c, struct constraint *new);
 bool solve_constraints(struct constraints *constraints, struct drawing *drawing);
+
+#define DEG(x) ((x) * M_PI / 180.0)

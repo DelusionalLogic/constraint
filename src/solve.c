@@ -40,7 +40,7 @@ void add_constraint(struct constraints *c, struct constraint *new) {
 }
 
 
-// @IMPROVE: We should do something better than this. I don't really know what.
+// @COMPL: We should do something better than this. I don't really know what.
 struct frontier {
 	struct component *elems[64];
 	size_t n;
@@ -108,6 +108,10 @@ static void build_angle_point_line(struct drawing *drawing, struct constraint *c
 	});
 }
 
+// CLEANUP: None of this makes any sense. We shouldn't have to resolve the
+// angles separately. We should just be building up the subgraphs correctly,
+// and then the solutions for angles will pop out by themselves. So remove this
+// once we get subgraph solving working
 struct angle_search_frame {
 	size_t constraint_i;
 	struct component *head;
