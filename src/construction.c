@@ -68,7 +68,7 @@ struct element* insert_cmd(struct drawing *drawing, struct command cmd) {
 
 #define SETSIGN(b, v) ((v) * ((2 * (b)) - 1))
 
-void execute_drawing(struct drawing *drawing, double inputs[]) {
+void place_points(struct drawing *drawing, double inputs[]) {
 	for(struct command *current = drawing->root; current != NULL; current = current->next) {
 		switch(current->op) {
 			case CMD_VALUE_INPUT: {

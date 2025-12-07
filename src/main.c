@@ -10,60 +10,6 @@
 #include "cad/solve.h"
 #include "cad/svg.h"
 
-void plot_point(struct point p) {
-	printf("<circle cx=\"%f\" cy=\"%f\" r=\".4\" fill=\"black\" />\n", p.pos[0], -p.pos[1]);
-}
-
-void plot_line(struct line l) {
-	char *style_str = "stroke=\"black\" stroke-width=\"0.2\"";
-	if(fabs(l.norm[0]) < fabs(l.norm[1])) {
-		double minx = -50;
-		double maxx =  50;
-
-		double miny = -(l.norm[0] * minx + l.C) / l.norm[1];
-		double maxy = -(l.norm[0] * maxx + l.C) / l.norm[1];
-		printf("<line %s x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\" />\n", style_str, minx, -miny, maxx, -maxy);
-	} else {
-		double miny = -50;
-		double maxy =  50;
-
-		double minx = -(l.norm[1] * miny + l.C) / l.norm[0];
-		double maxx = -(l.norm[1] * maxy + l.C) / l.norm[0];
-		printf("<line %s x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\" />\n", style_str, minx, -miny, maxx, -maxy);
-	}
-
-	double d0 = glm_vec2_norm2(l.norm);
-
-	vec2 p0 = {0, 0};
-	glm_vec2_mulsubs(l.norm, l.C, p0);
-	glm_vec2_divs(p0, d0, p0);
-
-	vec2 p1;
-	glm_vec2_add(p0, l.norm, p1);
-
-	printf("<line x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\" stroke=\"black\" stroke-width=\".2\" />\n", p0[0], -p0[1], p1[0], -p1[1]);
-}
-
-void plot_circle(struct circle c) {
-	printf("<circle cx=\"%f\" cy=\"%f\" r=\"%f\" fill=\"none\" stroke=\"black\" stroke-width=\".1\" />\n", c.center[0], -c.center[1], c.radius);
-}
-
-void plot_generic(struct element e) {
-	switch(e.type) {
-		case ETYPE_VALUE:
-			break;
-		case ETYPE_CIRCLE:
-			plot_circle(e.circle);
-			break;
-		case ETYPE_POINT:
-			plot_point(e.point);
-			break;
-		case ETYPE_LINE:
-			plot_line(e.line);
-			break;
-	}
-}
-
 struct smooth_line {
 	struct component l1;
 	struct component l2;
@@ -80,7 +26,7 @@ struct smooth_line {
 	struct component corner_end;
 };
 
-struct smooth_line init_smooth_line() {
+struct smooth_line a_smooth_line() {
 	return  (struct smooth_line){
 		.l1 = {.type = COM_LINE},
 		.l2 = {.type = COM_LINE},
@@ -102,7 +48,7 @@ struct box {
 	struct component side[4];
 };
 
-struct box init_box() {
+struct box a_box() {
 	return (struct box){
 		.corner = {
 			{.type = COM_POINT},
@@ -130,7 +76,7 @@ struct mid {
 	struct component p;
 };
 
-struct mid init_mid() {
+struct mid a_midpoint() {
 	return (struct mid) {
 		.l1 = {.type = COM_LINE},
 		.l2 = {.type = COM_LINE},
@@ -141,6 +87,36 @@ struct mid init_mid() {
 
 		.p = {.type = COM_POINT},
 	};
+}
+
+void draw_from_constraints(struct constraints *c, struct topology *t, struct canvas *cv) {
+	struct drawing drawing = {};
+	solve_constraints(c, &drawing);
+
+	// Copy over all the parameter values to a new array
+	// @PERF: Maybe we should just store them in a separate array to start with
+	double *params = malloc(sizeof(double) * (c->length));
+	for(size_t i = 0; i < c->length; i++) {
+		params[i] = c->elements[i].v;
+	}
+
+	place_points(&drawing, params);
+
+	begin_drawing(cv);
+	// for(struct command *current = drawing.root; current != NULL && current != drawing.error; current = current->next) {
+	// 	if(current->hidden) continue;
+	// 	plot_generic(current->result);
+	// }
+
+	// if(drawing.error != NULL) {
+	// 	plot_generic(*drawing.error->arg1);
+	// 	plot_generic(*drawing.error->arg2);
+	// 	fprintf(stderr, "Solver error detected. Drawing will be incomplete\n");
+	// }
+
+	draw_topology(cv, t);
+	draw_constraints(cv, c);
+	end_drawing(cv);
 }
 
 int main(int argc, char *argv[]) {
@@ -183,7 +159,7 @@ int main(int argc, char *argv[]) {
 		CEND(),
 	});
 
-	struct smooth_line line = init_smooth_line();
+	struct smooth_line line = a_smooth_line();
 
 	add_fragment(&topo, (struct topology_elem[]){
 		TOPO_MOVETO(&line.start),
@@ -225,7 +201,7 @@ int main(int argc, char *argv[]) {
 		CEND(),
 	});
 
-	struct box box = init_box();
+	struct box box = a_box();
 	add_fragment(&topo, (struct topology_elem[]){
 		TOPO_MOVETO(&box.corner[0]),
 		TOPO_LINETO(&box.corner[1]),
@@ -249,19 +225,23 @@ int main(int argc, char *argv[]) {
 		POINT_ON_LINE(&box.corner[0], &box.side[3]),
 		POINT_ON_LINE(&box.corner[3], &box.side[3]),
 
-		LL_ANGLE(&box.side[3], &box.side[0], DEG(80)),
-		LL_ANGLE(&box.side[1], &box.side[2], DEG(100)),
-		LL_ANGLE(&box.side[1], &box.side[3], DEG(180)),
-		LL_ANGLE(&components[3], &box.side[1], DEG(90)),
+		LL_ANGLE(&box.side[3], &box.side[0], DEG(90)),
+		LL_ANGLE(&box.side[1], &box.side[2], DEG(90)),
+		LL_ANGLE(&box.side[2], &box.side[3], DEG(90)),
 
 		PL_DISTANCE(&box.side[1], &box.corner[0], 20),
 
 		PP_DISTANCE(&line.corner_end, &box.corner[0], 9.5),
-		PP_DISTANCE(&line.corner_start, &box.corner[0], 10),
+		PL_DISTANCE(&box.corner[0], &components[3], 20),
 		CEND(),
 	});
 
-	struct mid box_enter = init_mid();
+	add_constraint(&constraints, (struct constraint[]){
+		LL_ANGLE(&components[3], &box.side[1], DEG(90)),
+		CEND(),
+	});
+
+	struct mid box_enter = a_midpoint();
 
 	add_constraint(&constraints, (struct constraint[]){
 		LL_ANGLE(&box.side[3], &box_enter.l1, DEG(-30)),
@@ -282,31 +262,10 @@ int main(int argc, char *argv[]) {
 		CEND(),
 	});
 
-	struct drawing drawing = {};
-	solve_constraints(&constraints, &drawing);
-
-	// Copy over all the parameter values to a new array
-	// @PERF: Maybe we should just store them in a separate array to start with
-	double *params = malloc(sizeof(double) * (constraints.length));
-	for(size_t i = 0; i < constraints.length; i++) {
-		params[i] = constraints.elements[i].v;
-	}
-
-	execute_drawing(&drawing, params);
-
-	begin_drawing();
-	// for(struct command *current = drawing.root; current != NULL && current != drawing.error; current = current->next) {
-	// 	if(current->hidden) continue;
-	// 	plot_generic(current->result);
-	// }
-
-	// if(drawing.error != NULL) {
-	// 	plot_generic(*drawing.error->arg1);
-	// 	plot_generic(*drawing.error->arg2);
-	// 	fprintf(stderr, "Solver error detected. Drawing will be incomplete\n");
-	// }
-
-	draw_topology(&topo);
-	draw_constraints(&constraints);
-	end_drawing();
+	struct canvas canvas = {
+		.state = CANVAS_INIT,
+		.f = stdout,
+	};
+	
+	draw_from_constraints(&constraints, &topo, &canvas);
 }

@@ -1,4 +1,5 @@
 #include "cad/topology.h"
+#include "cad/log.h"
 #include "cad/util.h"
 
 #include <string.h>
@@ -21,7 +22,7 @@ size_t frag_len(struct topology_elem *elems) {
 				cur += 3;
 				break;
 			case TOPO_END:
-				abort();
+				CRASH("We should never get to here");
 		}
 	}
 

@@ -2,7 +2,9 @@
 
 #define SIGNOF(x) ((typeof(x))((x)>0) - ((x)<0))
 
-void plot_line_between_style(struct point p1, struct point p2, enum LineStyle style) {
+void plot_line_between_style(struct canvas *canvas, struct point p1, struct point p2, enum LineStyle style) {
+	assert(canvas->state == CANVAS_DRAWING);
+
 	char *style_str;
 	switch(style) {
 		case LSTYLE_NORMAL:
@@ -19,14 +21,16 @@ void plot_line_between_style(struct point p1, struct point p2, enum LineStyle st
 			break;
 	}
 
-        printf("<line %s x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\" />\n", style_str, p1.pos[0], -p1.pos[1], p2.pos[0], -p2.pos[1]);
+	fprintf(canvas->f, "<line %s x1=\"%f\" y1=\"%f\" x2=\"%f\" y2=\"%f\" />\n", style_str, p1.pos[0], -p1.pos[1], p2.pos[0], -p2.pos[1]);
 }
 
-void plot_line_between(struct point p1, struct point p2) {
-	plot_line_between_style(p1, p2, LSTYLE_NORMAL);
+void plot_line_between(struct canvas *canvas, struct point p1, struct point p2) {
+	plot_line_between_style(canvas, p1, p2, LSTYLE_NORMAL);
 }
 
-void plot_arc_between_style(struct point c, struct point p1, struct point p2, enum LineStyle style) {
+void plot_arc_between_style(struct canvas *canvas, struct point c, struct point p1, struct point p2, enum LineStyle style) {
+	assert(canvas->state == CANVAS_DRAWING);
+
 	char *style_str;
 	switch(style) {
 		case LSTYLE_NORMAL:
@@ -61,18 +65,22 @@ void plot_arc_between_style(struct point c, struct point p1, struct point p2, en
 	vec2 t;
 	glm_vec2_sub(c.pos, p1.pos, t);
 	double r = glm_vec2_norm(t);
-	printf("<path %s d=\"M %f %f A %f %f 0 %d 0 %f %f\" fill=\"none\" />\n", style_str, p2.pos[0], -p2.pos[1], r, r, above_pi, p1.pos[0], -p1.pos[1]);
+	fprintf(canvas->f, "<path %s d=\"M %f %f A %f %f 0 %d 0 %f %f\" fill=\"none\" />\n", style_str, p2.pos[0], -p2.pos[1], r, r, above_pi, p1.pos[0], -p1.pos[1]);
 }
 
-void plot_arc_between(struct point c, struct point p1, struct point p2) {
-	plot_arc_between_style(c, p1, p2, LSTYLE_NORMAL);
+void plot_arc_between(struct canvas *canvas, struct point c, struct point p1, struct point p2) {
+	plot_arc_between_style(canvas, c, p1, p2, LSTYLE_NORMAL);
 }
 
-void plot_text(struct point p, double angle, char* str) {
-	printf("<text text-anchor=\"middle\" dominant-baseline=\"central\" transform=\"translate(%f, %f) scale(1, -1) rotate(%f) scale(1, -1)\" font-size=\"0.75\">%s</text>\n", p.pos[0], -p.pos[1], angle * (180.0/M_PI), str);
+void plot_text(struct canvas *canvas, struct point p, double angle, char* str) {
+	assert(canvas->state == CANVAS_DRAWING);
+
+	fprintf(canvas->f, "<text text-anchor=\"middle\" dominant-baseline=\"central\" transform=\"translate(%f, %f) scale(1, -1) rotate(%f) scale(1, -1)\" font-size=\"0.75\">%s</text>\n", p.pos[0], -p.pos[1], angle * (180.0/M_PI), str);
 }
 
-void plot_angle(struct line l1, struct line l2, double theta, struct point *intersect, struct point *p1, struct point *p2) {
+void plot_angle(struct canvas *canvas, struct line l1, struct line l2, double theta, struct point *intersect, struct point *p1, struct point *p2) {
+	assert(canvas->state == CANVAS_DRAWING);
+
 	line_line_intersect(l1, l2, intersect);
 
 	struct circle c = { .radius = 1.3 };
@@ -81,7 +89,7 @@ void plot_angle(struct line l1, struct line l2, double theta, struct point *inte
 	circle_line_intersect(c, l1, 0, p1);
 	circle_line_intersect(c, l2, 0, p2);
 
-	plot_arc_between_style(*intersect, *p2, *p1, LSTYLE_INDICATOR);
+	plot_arc_between_style(canvas, *intersect, *p2, *p1, LSTYLE_INDICATOR);
 
 	vec2 l1v;
 	vec2 l2v;
@@ -106,7 +114,7 @@ void plot_angle(struct line l1, struct line l2, double theta, struct point *inte
 
 	char buf[512];
 	snprintf(buf, sizeof(buf), "%.1f°", theta);
-	plot_text(label_point, angle - M_PI/2, buf);
+	plot_text(canvas, label_point, angle - M_PI/2, buf);
 }
 
 double project_point_to_line_distance(struct point p, struct line l) {
@@ -139,7 +147,9 @@ void extend_line_to(struct component* c, struct point *p) {
 	}
 }
 
-static void plot_distance_indicator(struct point p1, struct point p2, double distance, bool offset) {
+static void plot_distance_indicator(struct canvas *canvas, struct point p1, struct point p2, double distance, bool offset) {
+	assert(canvas->state == CANVAS_DRAWING);
+
 	vec2 dir;
 	glm_vec2_sub(p2.pos, p1.pos, dir);
 	glm_vec2_normalize(dir);
@@ -155,7 +165,7 @@ static void plot_distance_indicator(struct point p1, struct point p2, double dis
 			glm_vec2_copy(p1.pos, start.pos);
 			glm_vec2_copy(p2.pos, end.pos);
 		}
-		plot_line_between_style(start, end, offset ? LSTYLE_INDICATOR : LSTYLE_INDICATOR_INLINE);
+		plot_line_between_style(canvas, start, end, offset ? LSTYLE_INDICATOR : LSTYLE_INDICATOR_INLINE);
 	}
 
 	if(offset) {
@@ -167,14 +177,14 @@ static void plot_distance_indicator(struct point p1, struct point p2, double dis
 			struct point p2;
 			glm_vec2_add(start.pos, tip, p1.pos);
 			glm_vec2_sub(start.pos, tip, p2.pos);
-			plot_line_between_style(p1, p2, LSTYLE_INDICATOR);
+			plot_line_between_style(canvas, p1, p2, LSTYLE_INDICATOR);
 		}
 		{
 			struct point p1;
 			struct point p2;
 			glm_vec2_add(end.pos, tip, p1.pos);
 			glm_vec2_sub(end.pos, tip, p2.pos);
-			plot_line_between_style(p1, p2, LSTYLE_INDICATOR);
+			plot_line_between_style(canvas, p1, p2, LSTYLE_INDICATOR);
 		}
 	}
 
@@ -202,7 +212,7 @@ static void plot_distance_indicator(struct point p1, struct point p2, double dis
 
 		char buf[512];
 		snprintf(buf, sizeof(buf), "%.1f u", distance);
-		plot_text(p, angle, buf);
+		plot_text(canvas, p, angle, buf);
 	}
 }
 
@@ -216,7 +226,9 @@ void line_distance_to_point(struct line l, double d, struct point *p) {
 	glm_vec2_muladds(perp, d, p->pos);
 }
 
-void draw_constraints(struct constraints *constraints) {
+void draw_constraints(struct canvas *canvas, struct constraints *constraints) {
+	assert(canvas->state == CANVAS_DRAWING);
+
 	for(size_t i = 0; i < constraints->length; i++) {
 		struct constraint *constraint = &constraints->elements[i];
 		if(!constraint->used) continue;
@@ -229,8 +241,8 @@ void draw_constraints(struct constraints *constraints) {
 
 				// @COMPL: It would be nice to combine the indicator and
 				// construction line if there's no topology line there
-				plot_line_between_style(constraint->c1->e->point, constraint->c2->e->point, LSTYLE_CONSTRUCTION);
-				plot_distance_indicator(constraint->c1->e->point, constraint->c2->e->point, constraint->v, true);
+				plot_line_between_style(canvas, constraint->c1->e->point, constraint->c2->e->point, LSTYLE_CONSTRUCTION);
+				plot_distance_indicator(canvas, constraint->c1->e->point, constraint->c2->e->point, constraint->v, true);
 			} break;
 			case CT_LINE_LINE_ANGLE: {
 				assert(constraint->c1->type == COM_LINE);
@@ -251,7 +263,7 @@ void draw_constraints(struct constraints *constraints) {
 				struct point p1;
 				struct point p2;
 				struct point intersect;
-				plot_angle(l1->e->line, l2->e->line, constraint->v, &intersect, &p1, &p2);
+				plot_angle(canvas, l1->e->line, l2->e->line, constraint->v, &intersect, &p1, &p2);
 
 				extend_line_to(constraint->c1, &intersect);
 				extend_line_to(constraint->c2, &intersect);
@@ -279,7 +291,7 @@ void draw_constraints(struct constraints *constraints) {
 					// @COMPL: It would be nice to combine the indicator and
 					// construction line if there's no topology line there
 					// plot_line_between_style(closest, point->e->point, LSTYLE_CONSTRUCTION);
-					plot_distance_indicator(point->e->point, closest, constraint->v, false);
+					plot_distance_indicator(canvas, point->e->point, closest, constraint->v, false);
 				}
 
 				extend_line_to(line, &point->e->point);
@@ -304,14 +316,14 @@ void draw_constraints(struct constraints *constraints) {
 				if(!constraint->c1->drawn) {
 					line_distance_to_point(constraint->c1->e->line, constraint->c1->min, &p1);
 					line_distance_to_point(constraint->c1->e->line, constraint->c1->max, &p2);
-					plot_line_between_style(p1, p2, LSTYLE_CONSTRUCTION);
+					plot_line_between_style(canvas, p1, p2, LSTYLE_CONSTRUCTION);
 					constraint->c1->drawn = true;
 				}
 
 				if(!constraint->c2->drawn) {
 					line_distance_to_point(constraint->c2->e->line, constraint->c2->min, &p1);
 					line_distance_to_point(constraint->c2->e->line, constraint->c2->max, &p2);
-					plot_line_between_style(p1, p2, LSTYLE_CONSTRUCTION);
+					plot_line_between_style(canvas, p1, p2, LSTYLE_CONSTRUCTION);
 					constraint->c2->drawn = true;
 				}
 			} break;
@@ -322,7 +334,9 @@ void draw_constraints(struct constraints *constraints) {
 	}
 }
 
-void draw_topology(struct topology *topo) {
+void draw_topology(struct canvas *canvas, struct topology *topo) {
+	assert(canvas->state == CANVAS_DRAWING);
+
 	struct component *head = NULL;
 	for(size_t i = 0; i < topo->length; i++) {
 		struct topology_elem *cur = &topo->elements[i];
@@ -334,14 +348,14 @@ void draw_topology(struct topology *topo) {
 			case TOPO_LINETO:
 				cur++;
 				if(cur->arg.c->e != NULL) {
-					plot_line_between(head->e->point, cur->arg.c->e->point);
+					plot_line_between(canvas, head->e->point, cur->arg.c->e->point);
 					head = cur->arg.c;
 				}
 				break;
 			case TOPO_ARCTO:
 				cur++;
 				if(cur->arg.c->e != NULL && (cur+1)->arg.c->e != NULL) {
-					plot_arc_between(cur->arg.c->e->point, (cur+1)->arg.c->e->point, head->e->point);
+					plot_arc_between(canvas, cur->arg.c->e->point, (cur+1)->arg.c->e->point, head->e->point);
 					head = (cur+1)->arg.c;
 				}
 				break;
@@ -351,19 +365,26 @@ void draw_topology(struct topology *topo) {
 	}
 }
 
-void begin_drawing() {
-	printf("<svg version=\"1.1\" viewBox=\"-50 -50 100 100\" width=\"1200\" height=\"1200\" xmlns=\"http://www.w3.org/2000/svg\">\n");
-	printf("<defs>\n");
-    printf("\t<marker id=\"triangle\" viewBox=\"0 0 10 10\" refX=\"10\" refY=\"5\" markerUnits=\"strokeWidth\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto-start-reverse\">\n");
-    printf("\t\t<path d=\"M 0 0 L 10 5 L 0 10 z\" fill=\"blue\" opacity=\"0.3\" />\n");
-    printf("\t</marker>\n");
-	printf("</defs>\n");
+void begin_drawing(struct canvas *canvas) {
+	assert(canvas->f != NULL);
+	assert(canvas->state == CANVAS_INIT);
+
+	fprintf(canvas->f, "<svg version=\"1.1\" viewBox=\"-50 -50 100 100\" width=\"1200\" height=\"1200\" xmlns=\"http://www.w3.org/2000/svg\">\n");
+	fprintf(canvas->f, "<defs>\n");
+	fprintf(canvas->f, "\t<marker id=\"triangle\" viewBox=\"0 0 10 10\" refX=\"10\" refY=\"5\" markerUnits=\"strokeWidth\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto-start-reverse\">\n");
+	fprintf(canvas->f, "\t\t<path d=\"M 0 0 L 10 5 L 0 10 z\" fill=\"blue\" opacity=\"0.3\" />\n");
+	fprintf(canvas->f, "\t</marker>\n");
+	fprintf(canvas->f, "</defs>\n");
 
 	// Axis lines
-	printf("<line x1=\"-1000\" y1=\"0\" x2=\"1000\" y2=\"0\" stroke=\"black\" stroke-width=\"0.1\" stroke-opacity=\"0.4\" />\n");
-	printf("<line y1=\"-1000\" x1=\"0\" y2=\"1000\" x2=\"0\" stroke=\"black\" stroke-width=\"0.1\" stroke-opacity=\"0.4\" />\n");
+	fprintf(canvas->f, "<line x1=\"-1000\" y1=\"0\" x2=\"1000\" y2=\"0\" stroke=\"black\" stroke-width=\"0.1\" stroke-opacity=\"0.4\" />\n");
+	fprintf(canvas->f, "<line y1=\"-1000\" x1=\"0\" y2=\"1000\" x2=\"0\" stroke=\"black\" stroke-width=\"0.1\" stroke-opacity=\"0.4\" />\n");
+	canvas->state = CANVAS_DRAWING;
 }
 
-void end_drawing() {
-	printf("</svg>\n");
+void end_drawing(struct canvas *canvas) {
+	assert(canvas->state == CANVAS_DRAWING);
+
+	fprintf(canvas->f, "</svg>\n");
+	canvas->state = CANVAS_INIT;
 }

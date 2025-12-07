@@ -1,5 +1,6 @@
 #include "cad/solve.h"
 
+#include "cad/log.h"
 #include "cad/util.h"
 #include <string.h>
 
@@ -595,13 +596,55 @@ static void draw_solution(struct constraint *constraints, size_t fix, struct sol
 				.arg1 = c,
 				.arg2 = l,
 			});
+		} else if(constraints[step->i].type == CT_POINT_POINT_DISTANCE
+			&& local_i->type == COM_POINT
+			&& constraints[step->j].type == CT_POINT_LINE_DISTANCE
+			&& local_j->type == COM_LINE) {
+			// @COPYPASTA: Taken from rigth above but swapped
+			assert(oppo_i->type == COM_POINT);
+
+			struct element *d1 = insert_cmd(drawing, (struct command){
+				.op = CMD_VALUE_INPUT,
+				.index = step->i,
+				.dir = constraints[step->i].forward,
+				.result.type = ETYPE_VALUE,
+			});
+			struct element *d2 = insert_cmd(drawing, (struct command){
+				.op = CMD_VALUE_INPUT,
+				.index = step->j,
+				.dir = constraints[step->j].forward,
+				.result.type = ETYPE_VALUE,
+			});
+
+			struct element *l = insert_cmd(drawing, (struct command){
+				.op = CMD_LINE_LINE_DISTANCE_PARALLEL,
+				.hidden = !shown,
+				.result.type = ETYPE_LINE,
+				.arg1 = local_j->e,
+				.arg2 = d2,
+			});
+
+			struct element *c = insert_cmd(drawing, (struct command){
+				.op = CMD_CIRCLE_CENTER_RADIUS,
+				.hidden = !shown,
+				.result.type = ETYPE_CIRCLE,
+				.arg1 = local_i->e,
+				.arg2 = d1,
+			});
+
+			oppo_i->e = insert_cmd(drawing, (struct command){
+				.op = CMD_POINT_CIRCLE_LINE,
+				.hidden = !shown,
+				.root = constraints[step->j].c2 == local_i,
+				.result.type = ETYPE_POINT,
+				.arg1 = c,
+				.arg2 = l,
+			});
 		} else {
-			printf("Unknown constraint combination %s and %s\n", constraint_type_name[constraints[step->i].type], constraint_type_name[constraints[step->j].type]);
-			abort();
+			CRASH("Unknown constraint combination %s and %s\n", constraint_type_name[constraints[step->i].type], constraint_type_name[constraints[step->j].type]);
 		}
 
 	}
-
 }
 
 bool solve_constraints(struct constraints *constraints, struct drawing *drawing) {
