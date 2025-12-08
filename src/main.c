@@ -1,14 +1,4 @@
-#include <assert.h>
-#include <stdio.h>
-#include <stdbool.h>
-#include <stdlib.h>
-#include <cglm/cglm.h>
-#include <string.h>
-#include <limits.h>
-
-#include "cad/construction.h"
-#include "cad/solve.h"
-#include "cad/svg.h"
+#include "cad.h"
 
 struct smooth_line {
 	struct component l1;
