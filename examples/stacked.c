@@ -96,13 +96,14 @@ int main(int argc, char *argv[]) {
 		PP_DISTANCE(&box1.corner[1], &box1.corner[2], 10),
 
 		PP_SAME(&box2.corner[0], &box1.corner[3]),
-		PP_SAME(&box2.corner[1], &box1.corner[2]),
+		PP_DISTANCE(&box2.corner[0], &box2.corner[1], 10),
 		PP_DISTANCE(&box2.corner[1], &box2.corner[2], 10),
+		LL_ANGLE(&box2.side[0], &box1.side[0], DEG(-60)),
 
 		PP_SAME(&box3.corner[0], &box2.corner[3]),
 		PP_DISTANCE(&box3.corner[1], &box3.corner[2], 10),
 		PP_DISTANCE(&box3.corner[0], &box3.corner[1], 7),
-		LL_ANGLE(&box3.side[0], &box1.side[0], DEG(-40)),
+		LL_ANGLE(&box3.side[0], &box2.side[0], DEG(-20)),
 		CEND(),
 	});
 
