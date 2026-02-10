@@ -680,5 +680,14 @@ bool solve_constraints(struct constraints *constraints, struct drawing *drawing)
 		memcpy(alias->alias, alias->target, sizeof(struct component));
 	}
 
+	// Check for unsolved constraints
+	for(size_t i = 0; i < constraints->length; i++) {
+		if(!constraints->elements[i].used) {
+			free(steps);
+			return false;
+		}
+	}
+
+	free(steps);
 	return true;
 }
