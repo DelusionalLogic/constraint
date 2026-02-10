@@ -38,8 +38,10 @@ struct box {
 	struct component side[4];
 };
 
-struct box a_box() {
-	return (struct box){
+void a_box(struct box *box, struct topology *topo, struct constraints *constr) {
+	assert(box != NULL);
+
+	*box = (struct box){
 		.corner = {
 			{.type = COM_POINT},
 			{.type = COM_POINT},
@@ -53,6 +55,39 @@ struct box a_box() {
 			{.type = COM_LINE},
 		},
 	};
+
+	if(topo != NULL) {
+		add_fragment(topo, (struct topology_elem[]){
+			TOPO_MOVETO(&box->corner[0]),
+			TOPO_LINETO(&box->corner[1]),
+			TOPO_LINETO(&box->corner[2]),
+			TOPO_LINETO(&box->corner[3]),
+			TOPO_LINETO(&box->corner[0]),
+
+			TOPO_END(),
+		});
+	}
+
+	if(constr != NULL) {
+		add_constraint(constr, (struct constraint[]){
+			POINT_ON_LINE(&box->corner[0], &box->side[0]),
+			POINT_ON_LINE(&box->corner[1], &box->side[0]),
+
+			POINT_ON_LINE(&box->corner[1], &box->side[1]),
+			POINT_ON_LINE(&box->corner[2], &box->side[1]),
+
+			POINT_ON_LINE(&box->corner[2], &box->side[2]),
+			POINT_ON_LINE(&box->corner[3], &box->side[2]),
+
+			POINT_ON_LINE(&box->corner[0], &box->side[3]),
+			POINT_ON_LINE(&box->corner[3], &box->side[3]),
+
+			LL_ANGLE(&box->side[3], &box->side[0], DEG(90)),
+			LL_ANGLE(&box->side[1], &box->side[2], DEG(90)),
+			LL_ANGLE(&box->side[2], &box->side[3], DEG(90)),
+			CEND(),
+		});
+	}
 }
 
 struct mid {
@@ -91,6 +126,7 @@ void draw_from_constraints(struct constraints *c, struct topology *t, struct can
 	}
 
 	place_points(&drawing, params);
+	free(params);
 
 	begin_drawing(cv);
 	// for(struct command *current = drawing.root; current != NULL && current != drawing.error; current = current->next) {
@@ -146,6 +182,7 @@ int main(int argc, char *argv[]) {
 		POINT_ON_LINE(&components[4], &components[5]),
 
 		PP_DISTANCE(&components[0], &components[5], 12.8),
+
 		CEND(),
 	});
 
@@ -160,9 +197,8 @@ int main(int argc, char *argv[]) {
 		TOPO_END(),
 	});
 
-	alias_point(&constraints, &line.start, &components[5]);
-
 	add_constraint(&constraints, (struct constraint[]){
+		PP_SAME(&line.start, &components[5]),
 		LL_ANGLE(&components[3], &line.l1, DEG(90)),
 
 		POINT_ON_LINE(&line.start, &line.l1),
@@ -191,34 +227,10 @@ int main(int argc, char *argv[]) {
 		CEND(),
 	});
 
-	struct box box = a_box();
-	add_fragment(&topo, (struct topology_elem[]){
-		TOPO_MOVETO(&box.corner[0]),
-		TOPO_LINETO(&box.corner[1]),
-		TOPO_LINETO(&box.corner[2]),
-		TOPO_LINETO(&box.corner[3]),
-		TOPO_LINETO(&box.corner[0]),
-
-		TOPO_END(),
-	});
+	struct box box;
+	a_box(&box, &topo, &constraints);
 
 	add_constraint(&constraints, (struct constraint[]){
-		POINT_ON_LINE(&box.corner[0], &box.side[0]),
-		POINT_ON_LINE(&box.corner[1], &box.side[0]),
-
-		POINT_ON_LINE(&box.corner[1], &box.side[1]),
-		POINT_ON_LINE(&box.corner[2], &box.side[1]),
-
-		POINT_ON_LINE(&box.corner[2], &box.side[2]),
-		POINT_ON_LINE(&box.corner[3], &box.side[2]),
-
-		POINT_ON_LINE(&box.corner[0], &box.side[3]),
-		POINT_ON_LINE(&box.corner[3], &box.side[3]),
-
-		LL_ANGLE(&box.side[3], &box.side[0], DEG(90)),
-		LL_ANGLE(&box.side[1], &box.side[2], DEG(90)),
-		LL_ANGLE(&box.side[2], &box.side[3], DEG(90)),
-
 		PL_DISTANCE(&box.side[1], &box.corner[0], 20),
 
 		PP_DISTANCE(&line.corner_end, &box.corner[0], 9.5),

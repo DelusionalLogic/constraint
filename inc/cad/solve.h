@@ -53,6 +53,12 @@ enum constraint_type {
 		.c2 = C2, \
 	}
 
+#define PP_ALIAS(C1, C2) \
+	PP_DISTANCE(C1, C2, 0)
+
+#define PP_SAME(C1, C2) \
+	PP_DISTANCE(C1, C2, 0)
+
 #define PL_DISTANCE(C1, C2, D) \
 	{ \
 		.type = CT_POINT_LINE_DISTANCE, \
