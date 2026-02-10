@@ -4,6 +4,7 @@ SRCDIR ?= src
 INCDIR ?= inc
 OBJDIR ?= obj
 TSTDIR ?= test
+EXMDIR ?= examples
 
 LIBS = -lm
 INCS = -Ithirdparty/cglm/include -Iinc/
@@ -24,7 +25,12 @@ TST_OBJS = $(TST_SOURCES:%.c=$(OBJDIR)/%.o)
 TST_DEPS = $(TST_OBJS:%.o=%.d)
 TST_APPS = $(TST_SOURCES:%.c=$(OBJDIR)/%)
 
--include $(APP_DEPS) $(APP_MAIN_DEPS) $(TST_DEPS)
+EXM_SOURCES = $(shell find $(EXMDIR) -name "*.c")
+EXM_OBJS = $(EXM_SOURCES:%.c=$(OBJDIR)/%.o)
+EXM_DEPS = $(EXM_OBJS:%.o=%.d)
+EXM_APPS = $(EXM_SOURCES:%.c=$(OBJDIR)/%)
+
+-include $(APP_DEPS) $(APP_MAIN_DEPS) $(TST_DEPS) $(EXM_DEPS)
 
 # We don't really need to run the tests for bear to record them
 compile_commands.json: clean Makefile $(APP_SOURCES)
@@ -42,6 +48,10 @@ $(OBJDIR)/test/%: $(OBJDIR)/test/%.o $(APP_OBJS)
 	@mkdir -p $(dir $@)
 	$(CC) $(LDFLAGS) $(CFLAGS) -o $@ $< $(APP_OBJS) $(LIBS)
 
+$(OBJDIR)/examples/%: $(OBJDIR)/examples/%.o $(APP_OBJS)
+	@mkdir -p $(dir $@)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o $@ $< $(APP_OBJS) $(LIBS)
+
 clean:
 	@rm -rf $(OBJDIR)
 	@rm -f main
@@ -50,5 +60,7 @@ test: $(TST_APPS)
 	@echo "Running tests"
 	@for t in $(TST_APPS); do echo "$$t"; $$t; done
 
+examples: $(EXM_APPS)
+
 .DEFAULT_GOAL := all
-all: main test
+all: main test examples

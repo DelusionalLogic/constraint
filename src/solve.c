@@ -342,7 +342,7 @@ static void draw_solution(struct constraint *constraints, size_t fix, struct sol
 
 		struct element *distance = insert_cmd(drawing, (struct command){
 			.op = CMD_VALUE_INPUT,
-			.index = 0,
+			.index = fix,
 			.dir = constraints[fix].forward,
 			.result.type = ETYPE_VALUE,
 		});

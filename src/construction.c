@@ -36,9 +36,9 @@ bool circle_line_intersect(struct circle circle, struct line line, uint8_t root,
 }
 
 void line_through_points(struct point p1, struct point p2, struct line* l) {
-	l->norm[0] = p1.pos[1] - p1.pos[1];
+	l->norm[0] = p1.pos[1] - p2.pos[1];
 	l->norm[1] = p2.pos[0] - p1.pos[0];
-	l->C = p1.pos[1] * -l->norm[1] + p1.pos[0] * -l->norm[1];
+	l->C = p1.pos[0] * -l->norm[0] + p1.pos[1] * -l->norm[1];
 }
 
 void line_line_intersect(struct line l1, struct line l2, struct point* p) {
