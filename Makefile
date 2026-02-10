@@ -46,5 +46,9 @@ clean:
 	@rm -rf $(OBJDIR)
 	@rm -f main
 
+test: $(TST_APPS)
+	@echo "Running tests"
+	@for t in $(TST_APPS); do echo "$$t"; $$t; done
+
 .DEFAULT_GOAL := all
-all: main
+all: main test
