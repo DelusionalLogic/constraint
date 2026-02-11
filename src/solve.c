@@ -51,7 +51,7 @@ void free_constraints(struct constraints *c) {
 
 // @COMPL: We should do something better than this. I don't really know what.
 struct frontier {
-	struct component *elems[64];
+	struct component *elems[128];
 	size_t n;
 };
 
@@ -65,7 +65,7 @@ static bool frontier_scan(struct frontier *frontier, struct component *component
 
 static void add_frontier(struct frontier *frontier, struct component *component) {
 	assert(!frontier_scan(frontier, component));
-	assert(frontier->n < 64);
+	assert(frontier->n < 128);
 	frontier->elems[frontier->n++] = component;
 }
 
