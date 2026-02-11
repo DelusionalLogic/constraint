@@ -48,3 +48,4 @@ struct topology {
 };
 
 void add_fragment(struct topology *topo, struct topology_elem *new);
+void free_topology(struct topology *topo);

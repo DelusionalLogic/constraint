@@ -40,6 +40,14 @@ void add_constraint(struct constraints *c, struct constraint *new) {
 	c->length += new_num;
 }
 
+void free_constraints(struct constraints *c) {
+	free(c->elements);
+	c->elements = NULL;
+	c->length = 0;
+	c->capacity = 0;
+	c->aliases_num = 0;
+}
+
 
 // @COMPL: We should do something better than this. I don't really know what.
 struct frontier {
@@ -177,6 +185,7 @@ static bool find_angle(struct constraint *constraints, size_t constraints_num, s
 			if(frame < frames + SEARCH_DEPTH-1) {
 				path[frame - frames + 1].i = -1;
 			}
+			free(checked);
 			return true;
 		}
 
@@ -187,6 +196,7 @@ static bool find_angle(struct constraint *constraints, size_t constraints_num, s
 		frame->head = other;
 	}
 
+	free(checked);
 	return false;
 }
 

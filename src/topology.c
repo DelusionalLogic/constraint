@@ -38,3 +38,10 @@ void add_fragment(struct topology *topo, struct topology_elem *new) {
 	memcpy(topo->elements + topo->length, new, new_num * sizeof(struct topology_elem));
 	topo->length += new_num;
 }
+
+void free_topology(struct topology *topo) {
+	free(topo->elements);
+	topo->elements = NULL;
+	topo->length = 0;
+	topo->capacity = 0;
+}

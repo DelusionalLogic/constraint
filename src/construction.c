@@ -197,4 +197,16 @@ void place_points(struct drawing *drawing, double inputs[]) {
 	}
 }
 
+void free_drawing(struct drawing *drawing) {
+	struct command *c = drawing->root;
+	while (c) {
+		struct command *next = c->next;
+		free(c);
+		c = next;
+	}
+	drawing->root = NULL;
+	drawing->tail = NULL;
+	drawing->error = NULL;
+}
+
 

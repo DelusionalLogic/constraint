@@ -41,6 +41,9 @@ int main(int argc, char *argv[]) {
 		bool solved = solve_constraints(&constraints, &drawing);
 
 		assert(!solved);
+
+		free_drawing(&drawing);
+		free_constraints(&constraints);
 	}
 
 	return 0;

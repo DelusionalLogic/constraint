@@ -103,6 +103,7 @@ struct constraint {
 
 void alias_point(struct constraints *c, struct component *alias, struct component *target);
 void add_constraint(struct constraints *c, struct constraint *new);
+void free_constraints(struct constraints *c);
 bool solve_constraints(struct constraints *constraints, struct drawing *drawing);
 
 #define DEG(x) ((x) * M_PI / 180.0)

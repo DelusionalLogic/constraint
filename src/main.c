@@ -143,6 +143,8 @@ void draw_from_constraints(struct constraints *c, struct topology *t, struct can
 	draw_topology(cv, t);
 	draw_constraints(cv, c);
 	end_drawing(cv);
+
+	free_drawing(&drawing);
 }
 
 int main(int argc, char *argv[]) {
@@ -268,6 +270,9 @@ int main(int argc, char *argv[]) {
 		.state = CANVAS_INIT,
 		.f = stdout,
 	};
-	
+
 	draw_from_constraints(&constraints, &topo, &canvas);
+
+	free_constraints(&constraints);
+	free_topology(&topo);
 }

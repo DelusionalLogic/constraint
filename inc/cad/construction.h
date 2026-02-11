@@ -79,6 +79,7 @@ struct drawing {
 
 struct element* insert_cmd(struct drawing *drawing, struct command cmd);
 void place_points(struct drawing *drawing, double inputs[]);
+void free_drawing(struct drawing *drawing);
 
 bool circle_line_intersect(struct circle circle, struct line line, uint8_t root, struct point *point);
 void line_through_points(struct point p1, struct point p2, struct line* l);

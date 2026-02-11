@@ -65,6 +65,7 @@ int main(int argc, char *argv[]) {
 
 		assert(drawing.error == NULL);
 		assert(p3->point.pos[0] == 0.5 && fabs(p3->point.pos[1] - 0.866025) < 0.001);
+		free_drawing(&drawing);
 	}
 
 	{
@@ -131,6 +132,7 @@ int main(int argc, char *argv[]) {
 
 		assert(drawing.error == NULL);
 		assert(p3->point.pos[0] == 0.5 && fabs(p3->point.pos[1] - (-0.866025)) < 0.001);
+		free_drawing(&drawing);
 	}
 
 	{
@@ -213,6 +215,7 @@ int main(int argc, char *argv[]) {
 
 		assert(drawing.error != NULL);
 		assert(&drawing.error->result == p3);
+		free_drawing(&drawing);
 	}
 
 	{
@@ -265,6 +268,7 @@ int main(int argc, char *argv[]) {
 		place_points(&drawing, (double[]){1.0, 2.0});
 		assert(drawing.error != NULL);
 		assert(&drawing.error->result == p);
+		free_drawing(&drawing);
 	}
 
 	{
@@ -347,6 +351,7 @@ int main(int argc, char *argv[]) {
 		assert(drawing.error == NULL);
 		assert(fabs(tangent_point->point.pos[0] - 1.0) < 0.001);
 		assert(fabs(tangent_point->point.pos[1] - 0.0) < 0.001);
+		free_drawing(&drawing);
 	}
 
 	{
@@ -428,6 +433,7 @@ int main(int argc, char *argv[]) {
 		place_points(&drawing, (double[]){1.0, 5.0, 1.0});
 		assert(drawing.error != NULL);
 		assert(&drawing.error->result == p);
+		free_drawing(&drawing);
 	}
 
 	{
@@ -473,6 +479,7 @@ int main(int argc, char *argv[]) {
 		assert(drawing.error == NULL);
 		assert(fabs(intersection->point.pos[0]) < 0.001);
 		assert(fabs(intersection->point.pos[1]) < 0.001);
+		free_drawing(&drawing);
 	}
 
 	{
@@ -548,5 +555,6 @@ int main(int argc, char *argv[]) {
 		assert(drawing.error == NULL);
 		assert(fabs(intersection->point.pos[0] - (-2.0)) < 0.001);
 		assert(fabs(intersection->point.pos[1] - (-1.0)) < 0.001);
+		free_drawing(&drawing);
 	}
 }

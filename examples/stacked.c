@@ -1,35 +1,39 @@
 #include "cad.h"
 
 struct box {
-	struct component corner[4];
-	struct component side[4];
+	struct component bottom_left;
+	struct component bottom_right;
+	struct component top_right;
+	struct component top_left;
+
+	struct component bottom;
+	struct component right;
+	struct component top;
+	struct component left;
 };
 
 void a_box(struct box *box, struct topology *topo, struct constraints *constr) {
 	assert(box != NULL);
 
 	*box = (struct box){
-		.corner = {
-			{.type = COM_POINT},
-			{.type = COM_POINT},
-			{.type = COM_POINT},
-			{.type = COM_POINT},
-		},
-		.side = {
-			{.type = COM_LINE},
-			{.type = COM_LINE},
-			{.type = COM_LINE},
-			{.type = COM_LINE},
-		},
+		.bottom_left = {.type = COM_POINT},
+		.bottom_right = {.type = COM_POINT},
+		.top_right = {.type = COM_POINT},
+		.top_left = {.type = COM_POINT},
+
+		.bottom = {.type = COM_LINE},
+		.right = {.type = COM_LINE},
+		.top = {.type = COM_LINE},
+		.left = {.type = COM_LINE},
 	};
 
 	if(topo != NULL) {
 		add_fragment(topo, (struct topology_elem[]){
-			TOPO_MOVETO(&box->corner[0]),
-			TOPO_LINETO(&box->corner[1]),
-			TOPO_LINETO(&box->corner[2]),
-			TOPO_LINETO(&box->corner[3]),
-			TOPO_LINETO(&box->corner[0]),
+			TOPO_MOVETO(&box->bottom_left),
+			TOPO_LINETO(&box->bottom_right),
+			TOPO_LINETO(&box->top_right),
+			TOPO_LINETO(&box->top_left),
+			TOPO_LINETO(&box->bottom_left),
 
 			TOPO_END(),
 		});
@@ -37,21 +41,21 @@ void a_box(struct box *box, struct topology *topo, struct constraints *constr) {
 
 	if(constr != NULL) {
 		add_constraint(constr, (struct constraint[]){
-			POINT_ON_LINE(&box->corner[0], &box->side[0]),
-			POINT_ON_LINE(&box->corner[1], &box->side[0]),
+			POINT_ON_LINE(&box->bottom_left, &box->bottom),
+			POINT_ON_LINE(&box->bottom_right, &box->bottom),
 
-			POINT_ON_LINE(&box->corner[1], &box->side[1]),
-			POINT_ON_LINE(&box->corner[2], &box->side[1]),
+			POINT_ON_LINE(&box->bottom_right, &box->right),
+			POINT_ON_LINE(&box->top_right, &box->right),
 
-			POINT_ON_LINE(&box->corner[2], &box->side[2]),
-			POINT_ON_LINE(&box->corner[3], &box->side[2]),
+			POINT_ON_LINE(&box->top_right, &box->top),
+			POINT_ON_LINE(&box->top_left, &box->top),
 
-			POINT_ON_LINE(&box->corner[0], &box->side[3]),
-			POINT_ON_LINE(&box->corner[3], &box->side[3]),
+			POINT_ON_LINE(&box->bottom_left, &box->left),
+			POINT_ON_LINE(&box->top_left, &box->left),
 
-			LL_ANGLE(&box->side[3], &box->side[0], DEG(90)),
-			LL_ANGLE(&box->side[1], &box->side[2], DEG(90)),
-			LL_ANGLE(&box->side[2], &box->side[3], DEG(90)),
+			LL_ANGLE(&box->left, &box->bottom, DEG(90)),
+			LL_ANGLE(&box->right, &box->top, DEG(90)),
+			LL_ANGLE(&box->top, &box->left, DEG(90)),
 			CEND(),
 		});
 	}
@@ -76,6 +80,8 @@ void draw_from_constraints(struct constraints *c, struct topology *t, struct can
 	draw_topology(cv, t);
 	draw_constraints(cv, c);
 	end_drawing(cv);
+
+	free_drawing(&drawing);
 }
 
 int main(int argc, char *argv[]) {
@@ -92,18 +98,18 @@ int main(int argc, char *argv[]) {
 	a_box(&box3, &topo, &constraints);
 
 	add_constraint(&constraints, (struct constraint[]){
-		PP_DISTANCE(&box1.corner[0], &box1.corner[1], 10),
-		PP_DISTANCE(&box1.corner[1], &box1.corner[2], 10),
+		PP_DISTANCE(&box1.bottom_left, &box1.bottom_right, 10),
+		PP_DISTANCE(&box1.bottom_right, &box1.top_right, 10),
 
-		PP_SAME(&box2.corner[0], &box1.corner[3]),
-		PP_DISTANCE(&box2.corner[0], &box2.corner[1], 10),
-		PP_DISTANCE(&box2.corner[1], &box2.corner[2], 10),
-		LL_ANGLE(&box2.side[0], &box1.side[0], DEG(-60)),
+		PP_SAME(&box2.bottom_left, &box1.top_left),
+		PP_DISTANCE(&box2.bottom_left, &box2.bottom_right, 10),
+		PP_DISTANCE(&box2.bottom_right, &box2.top_right, 10),
+		LL_ANGLE(&box2.bottom, &box1.bottom, DEG(-60)),
 
-		PP_SAME(&box3.corner[0], &box2.corner[3]),
-		PP_DISTANCE(&box3.corner[1], &box3.corner[2], 10),
-		PP_DISTANCE(&box3.corner[0], &box3.corner[1], 7),
-		LL_ANGLE(&box3.side[0], &box2.side[0], DEG(-20)),
+		PP_SAME(&box3.bottom_left, &box2.top_left),
+		PP_DISTANCE(&box3.bottom_right, &box3.top_right, 10),
+		PP_DISTANCE(&box3.bottom_left, &box3.bottom_right, 7),
+		LL_ANGLE(&box3.bottom, &box2.bottom, DEG(-20)),
 		CEND(),
 	});
 
@@ -111,6 +117,9 @@ int main(int argc, char *argv[]) {
 		.state = CANVAS_INIT,
 		.f = stdout,
 	};
-	
+
 	draw_from_constraints(&constraints, &topo, &canvas);
+
+	free_constraints(&constraints);
+	free_topology(&topo);
 }
