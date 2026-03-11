@@ -310,9 +310,6 @@ static size_t build_triangles(struct constraint *constraints, size_t constraints
 					} else continue;
 				}
 
-				// constraints[i].forward = i_forward;
-				// constraints[j].forward = j_forward;
-
 				add_frontier(&frontier, oppo_i);
 				constraints[i].used = true;
 				constraints[i].order = order++;
@@ -610,7 +607,7 @@ static void draw_solution(struct constraint *constraints, size_t fix, struct sol
 			&& local_i->type == COM_POINT
 			&& constraints[step->j].type == CT_POINT_LINE_DISTANCE
 			&& local_j->type == COM_LINE) {
-			// @COPYPASTA: Taken from rigth above but swapped
+			// @COPYPASTA: Taken from above but with params swapped
 			assert(oppo_i->type == COM_POINT);
 
 			struct element *d1 = insert_cmd(drawing, (struct command){
@@ -691,13 +688,13 @@ bool solve_constraints(struct constraints *constraints, struct drawing *drawing)
 	}
 
 	// Check for unsolved constraints
+	bool complete = true;
 	for(size_t i = 0; i < constraints->length; i++) {
 		if(!constraints->elements[i].used) {
-			free(steps);
-			return false;
+			complete = false;
 		}
 	}
 
 	free(steps);
-	return true;
+	return complete;
 }
