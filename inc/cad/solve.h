@@ -98,7 +98,7 @@ struct constraint {
 	uint64_t order;
 	struct path_step path[SEARCH_DEPTH];
 	bool forward;
-	bool used;
+	uint8_t used;
 };
 
 void alias_point(struct constraints *c, struct component *alias, struct component *target);

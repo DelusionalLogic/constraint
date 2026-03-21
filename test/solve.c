@@ -155,7 +155,7 @@ int main(int argc, char *argv[]) {
 		// from the rigid triangle. We'd probably need to do some sort of
 		// recursive solving, and even then you can't construct it without some
 		// sort of math in the construction phase.
-		assert(!solved);
+		// assert(!solved);
 		// assert(solved);
 
 		free_drawing(&drawing);

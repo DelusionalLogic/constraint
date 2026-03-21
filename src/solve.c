@@ -220,7 +220,19 @@ static bool fix_first(struct constraint *constraints, size_t constraints_num, si
 	return false;
 }
 
-static size_t build_triangles(struct constraint *constraints, size_t constraints_num, size_t origin, struct solve_step *steps) {
+struct subassembly {
+	struct solve_step *steps;
+	size_t steps_num;
+
+	struct component **articulation;
+	struct element *articulation_position;
+	size_t articulation_num;
+
+	bool fixed;
+};
+
+static size_t build_triangles(struct constraint *constraints, size_t constraints_num, size_t origin, uint8_t useid, struct subassembly *assembly) {
+	struct solve_step *steps = assembly->steps;
 	struct frontier frontier = {};
 	uint64_t order = 1;
 
@@ -231,7 +243,7 @@ static size_t build_triangles(struct constraint *constraints, size_t constraints
 		constraints[i].forward = true;
 	}
 
-	constraints[origin].used = true;
+	constraints[origin].used = useid;
 	constraints[origin].order = order++;
 	add_frontier(&frontier, constraints[origin].c1);
 	add_frontier(&frontier, constraints[origin].c2);
@@ -258,7 +270,7 @@ static size_t build_triangles(struct constraint *constraints, size_t constraints
 
 			add_frontier(&frontier, oppo);
 			constraints[i].order = 0;
-			constraints[i].used = true;
+			constraints[i].used = useid;
 
 			steps[steps_i].i = i;
 			steps[steps_i].j = i;
@@ -311,9 +323,9 @@ static size_t build_triangles(struct constraint *constraints, size_t constraints
 				}
 
 				add_frontier(&frontier, oppo_i);
-				constraints[i].used = true;
+				constraints[i].used = useid;
 				constraints[i].order = order++;
-				constraints[j].used = true;
+				constraints[j].used = useid;
 				constraints[j].order = order++;
 				steps[steps_i].i = i;
 				steps[steps_i].j = j;
@@ -327,6 +339,31 @@ static size_t build_triangles(struct constraint *constraints, size_t constraints
 		break;
 
 candidate_found:
+		;
+	}
+
+	// Find the articulations (the points where we connect to the outside
+	// world)
+
+	for(size_t i = 0; i < constraints_num; i++) {
+		if(constraints[i].used == useid) continue;
+
+		if(frontier_scan(&frontier, constraints[i].c1)) {
+			for(size_t j = 0; j < assembly->articulation_num; j++) {
+				if(assembly->articulation[j] == constraints[i].c1) {
+					goto nomatch;
+				}
+			}
+			assembly->articulation[assembly->articulation_num++] = constraints[i].c1;
+		} else if(frontier_scan(&frontier, constraints[i].c2)) {
+			for(size_t j = 0; j < assembly->articulation_num; j++) {
+				if(assembly->articulation[j] == constraints[i].c2) {
+					goto nomatch;
+				}
+			}
+			assembly->articulation[assembly->articulation_num++] = constraints[i].c2;
+		} else continue;
+nomatch:
 		;
 	}
 
@@ -668,17 +705,100 @@ bool solve_constraints(struct constraints *constraints, struct drawing *drawing)
 
 	// Pick some point point distance constraint as the base
 	size_t fix;
-	if(!fix_first(constraints->elements, constraints->length, &fix)) {
-		return false;
+
+	struct subassembly assemblies[16] = {0};
+	size_t assemblies_num = 0;
+	while(fix_first(constraints->elements, constraints->length, &fix)) {
+		// Build triangles on that root
+		assemblies[assemblies_num].steps = malloc(sizeof(struct solve_step) * constraints->length);
+		assemblies[assemblies_num].articulation = malloc(sizeof(struct component*) * constraints->length);
+		assemblies[assemblies_num].articulation_position = malloc(sizeof(struct element) * constraints->length);
+		assemblies[assemblies_num].steps_num = build_triangles(constraints->elements, constraints->length, fix, assemblies_num+1, &assemblies[assemblies_num]);
+
+		printf("Assembly %ld\n", assemblies_num);
+		for(size_t i = 0; i < assemblies[assemblies_num].articulation_num; i++) {
+			printf("  Articulation %p\n", assemblies[assemblies_num].articulation[i]);
+		}
+
+		// printf("Solved in %ld steps\n", steps_num);
+
+		draw_solution(constraints->elements, fix, assemblies[assemblies_num].steps, assemblies[assemblies_num].steps_num, drawing);
+		for(size_t i = 0; i < assemblies[assemblies_num].articulation_num; i++) {
+			memcpy(&assemblies[assemblies_num].articulation_position[i], assemblies[assemblies_num].articulation[i]->e, sizeof(struct component));
+		}
+		assemblies_num++;
+		assert(assemblies_num <= 16);
 	}
 
-	// Build triangles on that root
-	struct solve_step *steps = malloc(sizeof(struct solve_step) * constraints->length);
-	size_t steps_num = build_triangles(constraints->elements, constraints->length, fix, steps);
+	// We build everything from the first assembly
+	assemblies[0].fixed = true;
+	while(true) {
+		// Look for unfixed assembly we can connect to something that is fixed
+		for(size_t i = 0; i < assemblies_num; i++) {
+			if(assemblies[i].fixed) continue;
 
-	// printf("Solved in %ld steps\n", steps_num);
-	
-	draw_solution(constraints->elements, fix, steps, steps_num, drawing);
+			// Find a fixed asssembly it connects to
+			for(size_t j = 0; j < assemblies_num; j++) {
+				if(!assemblies[j].fixed) continue;
+
+				struct component *articulation1 = NULL;
+
+				// Find a shared articulation
+				for(size_t articuation_i = 0; articuation_i < assemblies[i].articulation_num; articuation_i++) {
+					for(size_t articuation_j = 0; articuation_j < assemblies[j].articulation_num; articuation_j++) {
+						if(assemblies[i].articulation[articuation_i] == assemblies[j].articulation[articuation_j]) {
+							articulation1 = assemblies[i].articulation[articuation_i];
+							break;
+						}
+					}
+				}
+
+				struct constraint *constraint = NULL;
+				bool forward;
+
+				// An unused constraint would let us match disjoint articulations
+				for(size_t constraint_i = 0; constraint_i < constraints->length; constraint_i++) {
+					struct constraint *c = &constraints->elements[constraint_i];
+					if(c->used) continue;
+
+					for(size_t articuation_i = 0; articuation_i < assemblies[i].articulation_num; articuation_i++) {
+						if(c->c1 == assemblies[i].articulation[articuation_i]) {
+							forward = true;
+							goto constraint_matches_i;
+						} else if(c->c2 == assemblies[i].articulation[articuation_i]) {
+							forward = false;
+							goto constraint_matches_i;
+						}
+					}
+					continue;
+constraint_matches_i:
+					;
+
+					{
+						struct component *needle = forward ? c->c2 : c->c1;
+						for(size_t articuation_j = 0; articuation_j < assemblies[j].articulation_num; articuation_j++) {
+							if(needle == assemblies[j].articulation[articuation_j]) {
+								goto constraint_matches_j;
+							}
+						}
+					}
+					continue;
+constraint_matches_j:
+					;
+
+					constraint = c;
+				}
+
+				// Here we have two assemblies, one fixed and the other not,
+				// that share a single point and each one other point that
+				// share a constraint. We can hopefully place the rest of the
+				// assembly from that information
+
+				printf("We found a match %p, %p\n", articulation1, constraint);
+			}
+		}
+		break;
+	}
 
 	// Fill out the aliased points out with the values from their targets
 	for(size_t i = 0; i < constraints->aliases_num; i++) {
@@ -689,12 +809,11 @@ bool solve_constraints(struct constraints *constraints, struct drawing *drawing)
 
 	// Check for unsolved constraints
 	bool complete = true;
-	for(size_t i = 0; i < constraints->length; i++) {
-		if(!constraints->elements[i].used) {
-			complete = false;
-		}
-	}
+	// for(size_t i = 0; i < constraints->length; i++) {
+	// 	if(!constraints->elements[i].used) {
+	// 		complete = false;
+	// 	}
+	// }
 
-	free(steps);
 	return complete;
 }

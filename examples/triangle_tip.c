@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
 	add_constraint(&constraints, (struct constraint[]){
 		// Make a triangle
 		PP_DISTANCE(&p1, &p2, 30),
-		PP_DISTANCE(&p1, &p3, 30),
+		PP_DISTANCE(&p3, &p1, 30),
 		PP_DISTANCE(&p2, &p3, 30),
 
 		POINT_ON_LINE(&p1, &t1base),
@@ -50,8 +50,9 @@ int main(int argc, char *argv[]) {
 		// With another triangle sharing a point
 		PP_DISTANCE(&p4, &p5, 30),
 		PP_DISTANCE(&p3, &p4, 30),
+		PP_DISTANCE(&p3, &p5, 30),
 
-		LL_ANGLE(&t2side, &t2base, DEG(120)),
+		// LL_ANGLE(&t2side, &t2base, DEG(120)),
 
 		POINT_ON_LINE(&p3, &t2side),
 		POINT_ON_LINE(&p4, &t2side),
