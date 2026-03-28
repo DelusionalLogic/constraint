@@ -63,7 +63,9 @@ void a_box(struct box *box, struct topology *topo, struct constraints *constr) {
 
 void draw_from_constraints(struct constraints *c, struct topology *t, struct canvas *cv) {
 	struct drawing drawing = {};
-	bool rc = solve_constraints(c, &drawing);
+	struct subassembly assemblies[16] = {};
+	size_t assemblies_num;
+	bool rc = solve_constraints(c, &drawing, assemblies, &assemblies_num);
 	assert(rc);
 
 	// Copy over all the parameter values to a new array

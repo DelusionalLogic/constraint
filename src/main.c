@@ -116,7 +116,9 @@ struct mid a_midpoint() {
 
 void draw_from_constraints(struct constraints *c, struct topology *t, struct canvas *cv) {
 	struct drawing drawing = {};
-	solve_constraints(c, &drawing);
+	struct subassembly assemblies[16] = {};
+	size_t assembly_num;
+	solve_constraints(c, &drawing, assemblies, &assembly_num);
 
 	// Copy over all the parameter values to a new array
 	// @PERF: Maybe we should just store them in a separate array to start with

@@ -2,6 +2,8 @@
 #include <assert.h>
 
 int main(int argc, char *argv[]) {
+	struct subassembly assemblies[16] = {};
+	size_t assemblies_num;
 	{
 		printf("Triangle by 3 distances\n");
 		struct constraints constraints = {};
@@ -18,7 +20,7 @@ int main(int argc, char *argv[]) {
 		});
 
 		struct drawing drawing = {};
-		bool solved = solve_constraints(&constraints, &drawing);
+		bool solved = solve_constraints(&constraints, &drawing, assemblies, &assemblies_num);
 
 		assert(solved);
 
@@ -55,7 +57,7 @@ int main(int argc, char *argv[]) {
 		});
 
 		struct drawing drawing = {};
-		bool solved = solve_constraints(&constraints, &drawing);
+		bool solved = solve_constraints(&constraints, &drawing, assemblies, &assemblies_num);
 
 		assert(solved);
 
@@ -105,7 +107,7 @@ int main(int argc, char *argv[]) {
 		});
 
 		struct drawing drawing = {};
-		bool solved = solve_constraints(&constraints, &drawing);
+		bool solved = solve_constraints(&constraints, &drawing, assemblies, &assemblies_num);
 		assert(solved);
 
 		free_drawing(&drawing);
@@ -149,7 +151,18 @@ int main(int argc, char *argv[]) {
 		});
 
 		struct drawing drawing = {};
-		bool solved = solve_constraints(&constraints, &drawing);
+		bool solved = solve_constraints(&constraints, &drawing, assemblies, &assemblies_num);
+
+		// Copy over all the parameter values to a new array
+		// @PERF: Maybe we should just store them in a separate array to start with
+		double *params = malloc(sizeof(double) * (constraints.length));
+		for(size_t i = 0; i < constraints.length; i++) {
+			params[i] = constraints.elements[i].v;
+		}
+
+		place_points(&drawing, params);
+
+		reconstruct_drawing(&constraints, assemblies, &assemblies_num);
 
 		// @COMPL: We don't currently know how to derive an angle constraint
 		// from the rigid triangle. We'd probably need to do some sort of

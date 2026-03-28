@@ -101,9 +101,22 @@ struct constraint {
 	uint8_t used;
 };
 
+struct subassembly {
+	struct solve_step *steps;
+	size_t steps_num;
+	size_t fix;
+
+	struct component **articulation;
+	struct element **articulation_position;
+	size_t articulation_num;
+
+	bool fixed;
+};
+
 void alias_point(struct constraints *c, struct component *alias, struct component *target);
 void add_constraint(struct constraints *c, struct constraint *new);
 void free_constraints(struct constraints *c);
-bool solve_constraints(struct constraints *constraints, struct drawing *drawing);
+bool solve_constraints(struct constraints *constraints, struct drawing *drawing, struct subassembly *assemblies, size_t *assemblies_num);
+void reconstruct_drawing(struct constraints *constraints, struct subassembly *assemblies, size_t *assemblies_num);
 
 #define DEG(x) ((x) * M_PI / 180.0)

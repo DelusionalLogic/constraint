@@ -2,7 +2,9 @@
 
 void draw_from_constraints(struct constraints *c, struct topology *t, struct canvas *cv) {
 	struct drawing drawing = {};
-	bool rc = solve_constraints(c, &drawing);
+	struct subassembly assemblies[16] = {};
+	size_t assemblies_num;
+	bool rc = solve_constraints(c, &drawing, assemblies, &assemblies_num);
 	assert(rc);
 
 	// Copy over all the parameter values to a new array
@@ -14,6 +16,8 @@ void draw_from_constraints(struct constraints *c, struct topology *t, struct can
 
 	place_points(&drawing, params);
 	free(params);
+
+	reconstruct_drawing(c, assemblies, &assemblies_num);
 
 	begin_drawing(cv);
 	draw_topology(cv, t);
@@ -50,7 +54,7 @@ int main(int argc, char *argv[]) {
 		// With another triangle sharing a point
 		PP_DISTANCE(&p4, &p5, 30),
 		PP_DISTANCE(&p3, &p4, 30),
-		PP_DISTANCE(&p3, &p5, 30),
+		PP_DISTANCE(&p5, &p3, 30),
 
 		// LL_ANGLE(&t2side, &t2base, DEG(120)),
 
@@ -61,7 +65,7 @@ int main(int argc, char *argv[]) {
 		POINT_ON_LINE(&p5, &t2base),
 
 		// The edge they don't share is constrained
-		LL_ANGLE(&t1base, &t2base, DEG(80)),
+		LL_ANGLE(&t1base, &t2base, DEG(70)),
 		CEND(),
 	});
 

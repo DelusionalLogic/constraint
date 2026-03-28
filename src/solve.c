@@ -220,17 +220,6 @@ static bool fix_first(struct constraint *constraints, size_t constraints_num, si
 	return false;
 }
 
-struct subassembly {
-	struct solve_step *steps;
-	size_t steps_num;
-
-	struct component **articulation;
-	struct element *articulation_position;
-	size_t articulation_num;
-
-	bool fixed;
-};
-
 static size_t build_triangles(struct constraint *constraints, size_t constraints_num, size_t origin, uint8_t useid, struct subassembly *assembly) {
 	struct solve_step *steps = assembly->steps;
 	struct frontier frontier = {};
@@ -691,7 +680,8 @@ static void draw_solution(struct constraint *constraints, size_t fix, struct sol
 	}
 }
 
-bool solve_constraints(struct constraints *constraints, struct drawing *drawing) {
+bool solve_constraints(struct constraints *constraints, struct drawing *drawing, struct subassembly *assemblies, size_t *assemblies_num) {
+	*assemblies_num = 0;
 	// Replace all the aliased points with the point they point to
 	for(size_t i = 0; i < constraints->aliases_num; i++) {
 		struct alias *alias = &constraints->aliases[i];
@@ -706,52 +696,81 @@ bool solve_constraints(struct constraints *constraints, struct drawing *drawing)
 	// Pick some point point distance constraint as the base
 	size_t fix;
 
-	struct subassembly assemblies[16] = {0};
-	size_t assemblies_num = 0;
 	while(fix_first(constraints->elements, constraints->length, &fix)) {
 		// Build triangles on that root
-		assemblies[assemblies_num].steps = malloc(sizeof(struct solve_step) * constraints->length);
-		assemblies[assemblies_num].articulation = malloc(sizeof(struct component*) * constraints->length);
-		assemblies[assemblies_num].articulation_position = malloc(sizeof(struct element) * constraints->length);
-		assemblies[assemblies_num].steps_num = build_triangles(constraints->elements, constraints->length, fix, assemblies_num+1, &assemblies[assemblies_num]);
+		assemblies[*assemblies_num].steps = malloc(sizeof(struct solve_step) * constraints->length);
+		assemblies[*assemblies_num].articulation = malloc(sizeof(struct component*) * constraints->length);
+		assemblies[*assemblies_num].articulation_position = malloc(sizeof(struct element*) * constraints->length);
+		assemblies[*assemblies_num].steps_num = build_triangles(constraints->elements, constraints->length, fix, *assemblies_num+1, &assemblies[*assemblies_num]);
+		assemblies[*assemblies_num].fix = fix;
 
-		printf("Assembly %ld\n", assemblies_num);
-		for(size_t i = 0; i < assemblies[assemblies_num].articulation_num; i++) {
-			printf("  Articulation %p\n", assemblies[assemblies_num].articulation[i]);
-		}
+		// printf("Assembly %ld\n", *assemblies_num);
+		// for(size_t i = 0; i < assemblies[*assemblies_num].articulation_num; i++) {
+		// 	printf("  Articulation %p\n", assemblies[*assemblies_num].articulation[i]);
+		// }
 
 		// printf("Solved in %ld steps\n", steps_num);
 
-		draw_solution(constraints->elements, fix, assemblies[assemblies_num].steps, assemblies[assemblies_num].steps_num, drawing);
-		for(size_t i = 0; i < assemblies[assemblies_num].articulation_num; i++) {
-			memcpy(&assemblies[assemblies_num].articulation_position[i], assemblies[assemblies_num].articulation[i]->e, sizeof(struct component));
+		draw_solution(constraints->elements, fix, assemblies[*assemblies_num].steps, assemblies[*assemblies_num].steps_num, drawing);
+		for(size_t i = 0; i < assemblies[*assemblies_num].articulation_num; i++) {
+			assemblies[*assemblies_num].articulation_position[i] = assemblies[*assemblies_num].articulation[i]->e;
 		}
-		assemblies_num++;
-		assert(assemblies_num <= 16);
+		(*assemblies_num)++;
+		assert(*assemblies_num <= 16);
 	}
 
+	// Fill out the aliased points out with the values from their targets
+	for(size_t i = 0; i < constraints->aliases_num; i++) {
+		struct alias *alias = &constraints->aliases[i];
+
+		memcpy(alias->alias, alias->target, sizeof(struct component));
+	}
+
+	// Check for unsolved constraints
+	bool complete = true;
+	// for(size_t i = 0; i < constraints->length; i++) {
+	// 	if(!constraints->elements[i].used) {
+	// 		complete = false;
+	// 	}
+	// }
+
+	return complete;
+}
+
+static void affine_transform_vec2(mat3 m, vec2 in, vec2 out) {
+	vec3 h = {in[0], in[1], 1.0f};
+	vec3 result;
+	glm_mat3_mulv(m, h, result);
+	out[0] = result[0];
+	out[1] = result[1];
+}
+
+void reconstruct_drawing(struct constraints *constraints, struct subassembly *assemblies, size_t *assemblies_num) {
 	// We build everything from the first assembly
 	assemblies[0].fixed = true;
 	while(true) {
 		// Look for unfixed assembly we can connect to something that is fixed
-		for(size_t i = 0; i < assemblies_num; i++) {
+		for(size_t i = 0; i < *assemblies_num; i++) {
 			if(assemblies[i].fixed) continue;
 
 			// Find a fixed asssembly it connects to
-			for(size_t j = 0; j < assemblies_num; j++) {
+			for(size_t j = 0; j < *assemblies_num; j++) {
 				if(!assemblies[j].fixed) continue;
 
-				struct component *articulation1 = NULL;
+				size_t articulation_i;
+				size_t articulation_j;
 
 				// Find a shared articulation
-				for(size_t articuation_i = 0; articuation_i < assemblies[i].articulation_num; articuation_i++) {
-					for(size_t articuation_j = 0; articuation_j < assemblies[j].articulation_num; articuation_j++) {
-						if(assemblies[i].articulation[articuation_i] == assemblies[j].articulation[articuation_j]) {
-							articulation1 = assemblies[i].articulation[articuation_i];
-							break;
+				for(articulation_i = 0; articulation_i < assemblies[i].articulation_num; articulation_i++) {
+					for(articulation_j = 0; articulation_j < assemblies[j].articulation_num; articulation_j++) {
+						if(assemblies[i].articulation[articulation_i] == assemblies[j].articulation[articulation_j]) {
+							goto articulation_found;
 						}
 					}
 				}
+				continue;
+articulation_found:
+				;
 
 				struct constraint *constraint = NULL;
 				bool forward;
@@ -794,26 +813,61 @@ constraint_matches_j:
 				// share a constraint. We can hopefully place the rest of the
 				// assembly from that information
 
-				printf("We found a match %p, %p\n", articulation1, constraint);
+				float theta = atan2(constraint->c1->e->line.norm[1], constraint->c1->e->line.norm[0]) - atan2(constraint->c2->e->line.norm[1], constraint->c2->e->line.norm[0]);
+				theta = forward ? theta : -theta;
+
+				constraint->used = true;
+				theta += constraint->forward ? constraint->v : -constraint->v;
+
+				assert(assemblies[i].articulation_position[articulation_i]->type == ETYPE_POINT);
+				assert(assemblies[j].articulation_position[articulation_j]->type == ETYPE_POINT);
+
+				mat3 transform;
+				glm_mat3_identity(transform);
+
+				glm_translate2d(transform, assemblies[i].articulation_position[articulation_i]->point.pos);
+
+				glm_rotate2d(transform, theta);
+
+				{
+					vec2 negative_translate;
+					glm_vec2_negate_to(assemblies[j].articulation_position[articulation_j]->point.pos, negative_translate);
+					glm_translate2d(transform, negative_translate);
+				}
+
+				// Transform the baseline points
+				{
+					struct component *c = constraints->elements[assemblies[i].fix].c1;
+					assert(c->type == COM_POINT);
+
+					affine_transform_vec2(transform, c->e->point.pos, c->e->point.pos);
+				}
+				{
+					struct component *c = constraints->elements[assemblies[i].fix].c2;
+					assert(c->type == COM_POINT);
+
+					affine_transform_vec2(transform, c->e->point.pos, c->e->point.pos);
+				}
+
+				// Transform all other points in the body by iterating the
+				// steps. Each step places a single component.
+				for(size_t k = 0; k < assemblies[i].steps_num; k++) {
+					struct solve_step *step = &assemblies[i].steps[k];
+
+					struct component *c = step->i_forward ?
+						constraints->elements[step->i].c2 :
+						constraints->elements[step->i].c1;
+
+					if(c->type == COM_POINT) {
+						affine_transform_vec2(transform, c->e->point.pos, c->e->point.pos);
+					}
+					// @HACK We're not transforming lines, this relies on the
+					// user not requiring/caring about the lines AFTER solving.
+					// This is wrong, but useful enough for getting something
+					// on screen.
+				}
 			}
 		}
 		break;
 	}
-
-	// Fill out the aliased points out with the values from their targets
-	for(size_t i = 0; i < constraints->aliases_num; i++) {
-		struct alias *alias = &constraints->aliases[i];
-
-		memcpy(alias->alias, alias->target, sizeof(struct component));
-	}
-
-	// Check for unsolved constraints
-	bool complete = true;
-	// for(size_t i = 0; i < constraints->length; i++) {
-	// 	if(!constraints->elements[i].used) {
-	// 		complete = false;
-	// 	}
-	// }
-
-	return complete;
 }
