@@ -814,7 +814,7 @@ constraint_matches_j:
 				// assembly from that information
 
 				float theta = atan2(constraint->c1->e->line.norm[1], constraint->c1->e->line.norm[0]) - atan2(constraint->c2->e->line.norm[1], constraint->c2->e->line.norm[0]);
-				theta = forward ? theta : -theta;
+				theta = forward ? -theta : theta;
 
 				constraint->used = true;
 				theta += constraint->forward ? constraint->v : -constraint->v;
@@ -835,7 +835,8 @@ constraint_matches_j:
 					glm_translate2d(transform, negative_translate);
 				}
 
-				// Transform the baseline points
+				// We have to transform the fixed point separately, since it
+				// doesn't have a build step
 				{
 					struct component *c = constraints->elements[assemblies[i].fix].c1;
 					assert(c->type == COM_POINT);
@@ -860,11 +861,32 @@ constraint_matches_j:
 
 					if(c->type == COM_POINT) {
 						affine_transform_vec2(transform, c->e->point.pos, c->e->point.pos);
+					} else if(c->type == COM_LINE) {
+						// Find a point on the line, what point doesn't matter
+						// since the whole line is moving
+						struct line line = c->e->line;
+						double a = line.norm[0];
+						double b = line.norm[1];
+
+						double rec = pow(a, 2) + pow(b, 2);
+						double x0 = -a*line.C / rec;
+						double y0 = -b*line.C / rec;
+						vec2 p = {x0, y0};
+
+						// Rotate the line to the new orientation
+						glm_vec2_rotate(line.norm, theta, line.norm);
+
+						// Transform the fixed point
+						affine_transform_vec2(transform, p, p);
+						glm_vec2_negate(p);
+
+						// Calculate a C to follow the new point
+						line.C = glm_vec2_dot(line.norm, p);
+
+						c->e->line = line;
+					} else {
+						abort();
 					}
-					// @HACK We're not transforming lines, this relies on the
-					// user not requiring/caring about the lines AFTER solving.
-					// This is wrong, but useful enough for getting something
-					// on screen.
 				}
 			}
 		}

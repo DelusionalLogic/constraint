@@ -39,8 +39,8 @@ int main(int argc, char *argv[]) {
 	struct component p5 = {.type = COM_POINT};
 
 	struct component t1base = {.type = COM_LINE};
+	struct component t1bas2 = {.type = COM_LINE};
 	struct component t2base = {.type = COM_LINE};
-	struct component t2side = {.type = COM_LINE};
 
 	add_constraint(&constraints, (struct constraint[]){
 		// Make a triangle
@@ -51,21 +51,19 @@ int main(int argc, char *argv[]) {
 		POINT_ON_LINE(&p1, &t1base),
 		POINT_ON_LINE(&p2, &t1base),
 
+		POINT_ON_LINE(&p1, &t1bas2),
+		LL_ANGLE(&t1base, &t1bas2, DEG(-10)),
+
 		// With another triangle sharing a point
 		PP_DISTANCE(&p4, &p5, 30),
 		PP_DISTANCE(&p3, &p4, 30),
 		PP_DISTANCE(&p5, &p3, 30),
 
-		// LL_ANGLE(&t2side, &t2base, DEG(120)),
-
-		POINT_ON_LINE(&p3, &t2side),
-		POINT_ON_LINE(&p4, &t2side),
-
 		POINT_ON_LINE(&p4, &t2base),
 		POINT_ON_LINE(&p5, &t2base),
 
 		// The edge they don't share is constrained
-		LL_ANGLE(&t1base, &t2base, DEG(70)),
+		LL_ANGLE(&t1bas2, &t2base, DEG(70)),
 		CEND(),
 	});
 
