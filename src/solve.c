@@ -810,8 +810,8 @@ constraint_matches_j:
 
 				// Here we have two assemblies, one fixed and the other not,
 				// that share a single point and each one other point that
-				// share a constraint. We can hopefully place the rest of the
-				// assembly from that information
+				// share a constraint. Try place the rigid body based on that
+				// information
 
 				float theta = atan2(constraint->c1->e->line.norm[1], constraint->c1->e->line.norm[0]) - atan2(constraint->c2->e->line.norm[1], constraint->c2->e->line.norm[0]);
 				theta = forward ? -theta : theta;
@@ -865,22 +865,22 @@ constraint_matches_j:
 						// Find a point on the line, what point doesn't matter
 						// since the whole line is moving
 						struct line line = c->e->line;
-						double a = line.norm[0];
-						double b = line.norm[1];
 
-						double rec = pow(a, 2) + pow(b, 2);
-						double x0 = -a*line.C / rec;
-						double y0 = -b*line.C / rec;
-						vec2 p = {x0, y0};
+						vec2 p;
+						glm_vec2_zero(p);
+
+						glm_vec2_muladds(line.norm, line.C, p);
+						double rec = glm_vec2_norm2(line.norm);
+						glm_vec2_divs(p, rec, p);
 
 						// Rotate the line to the new orientation
 						glm_vec2_rotate(line.norm, theta, line.norm);
 
 						// Transform the fixed point
 						affine_transform_vec2(transform, p, p);
-						glm_vec2_negate(p);
 
 						// Calculate a C to follow the new point
+						glm_vec2_negate(p);
 						line.C = glm_vec2_dot(line.norm, p);
 
 						c->e->line = line;

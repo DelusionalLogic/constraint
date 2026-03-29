@@ -1,5 +1,6 @@
 #include "cad/solve.h"
 #include <assert.h>
+#include <string.h>
 
 int main(int argc, char *argv[]) {
 	struct subassembly assemblies[16] = {};
@@ -146,7 +147,7 @@ int main(int argc, char *argv[]) {
 			POINT_ON_LINE(&p5, &t2base),
 
 			// The edge they don't share is constrained
-			LL_ANGLE(&t1base, &t2base, DEG(40)),
+			LL_ANGLE(&t1base, &t2base, DEG(70)),
 			CEND(),
 		});
 
@@ -159,17 +160,19 @@ int main(int argc, char *argv[]) {
 		for(size_t i = 0; i < constraints.length; i++) {
 			params[i] = constraints.elements[i].v;
 		}
-
 		place_points(&drawing, params);
+		free(params);
 
 		reconstruct_drawing(&constraints, assemblies, &assemblies_num);
 
-		// @COMPL: We don't currently know how to derive an angle constraint
-		// from the rigid triangle. We'd probably need to do some sort of
-		// recursive solving, and even then you can't construct it without some
-		// sort of math in the construction phase.
-		// assert(!solved);
-		// assert(solved);
+		assert(solved);
+
+		assert(glm_vec2_eqv_eps(p1.e->point.pos, (vec2){ 0.0     ,  0.0     }));
+		assert(glm_vec2_eqv_eps(p2.e->point.pos, (vec2){30.0     ,  0.0     }));
+		assert(glm_vec2_eqv_eps(p3.e->point.pos, (vec2){15.0     , 25.980762}));
+
+		assert(glm_vec2_eqv_eps(p4.e->point.pos, (vec2){34.283630,  2.999428}));
+		assert(glm_vec2_eqv_eps(p5.e->point.pos, (vec2){44.544235, 31.190207}));
 
 		free_drawing(&drawing);
 		free_constraints(&constraints);
