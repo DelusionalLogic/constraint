@@ -806,18 +806,68 @@ constraint_matches_j:
 					;
 
 					constraint = c;
+					goto constraint_found;
 				}
+				continue;
+constraint_found:
+				;
 
 				// Here we have two assemblies, one fixed and the other not,
 				// that share a single point and each one other point that
 				// share a constraint. Try place the rigid body based on that
 				// information
 
-				float theta = atan2(constraint->c1->e->line.norm[1], constraint->c1->e->line.norm[0]) - atan2(constraint->c2->e->line.norm[1], constraint->c2->e->line.norm[0]);
-				theta = forward ? -theta : theta;
+				float theta;
+				if(constraint->type == CT_LINE_LINE_ANGLE) {
+					assert(constraint->c1->e->type == ETYPE_LINE);
+					assert(constraint->c2->e->type == ETYPE_LINE);
 
-				constraint->used = true;
-				theta += constraint->forward ? constraint->v : -constraint->v;
+					// Align the two lines
+					theta = atan2(constraint->c1->e->line.norm[1], constraint->c1->e->line.norm[0]) - atan2(constraint->c2->e->line.norm[1], constraint->c2->e->line.norm[0]);
+					theta = forward ? -theta : theta;
+
+					// Then rotate by whatever the constraint says
+					theta += constraint->forward ? constraint->v : -constraint->v;
+				} else if(constraint->type == CT_POINT_LINE_DISTANCE) {
+					assert(constraint->c1->e->type == ETYPE_POINT);
+					assert(constraint->c2->e->type == ETYPE_LINE);
+
+					struct line line = constraint->c2->e->line;
+					float norm_len = glm_vec2_norm(line.norm);
+					float beta = atan2(line.norm[1], line.norm[0]);
+					float v_signed = constraint->forward ? constraint->v : -constraint->v;
+
+					if(forward) {
+						// Point (c1) is in assembly i (unfixed), line (c2) is in assembly j (fixed)
+						vec2 v_src;
+						glm_vec2_sub(constraint->c1->e->point.pos, assemblies[i].articulation_position[articulation_i]->point.pos, v_src);
+						float r = glm_vec2_norm(v_src);
+						float alpha = atan2(v_src[1], v_src[0]);
+
+						float d_pivot = (glm_vec2_dot(line.norm, assemblies[j].articulation_position[articulation_j]->point.pos) + line.C) / norm_len;
+						float cos_val = (v_signed - d_pivot) / r;
+						if(cos_val > 1.0f) cos_val = 1.0f;
+						if(cos_val < -1.0f) cos_val = -1.0f;
+
+						theta = beta - alpha + acos(cos_val);
+					} else {
+						// Line (c2) is in assembly i (unfixed), point (c1) is in assembly j (fixed)
+						vec2 v_ext;
+						glm_vec2_sub(constraint->c1->e->point.pos, assemblies[j].articulation_position[articulation_j]->point.pos, v_ext);
+						float r = glm_vec2_norm(v_ext);
+						float alpha_ext = atan2(v_ext[1], v_ext[0]);
+
+						float d_pivot_i = (glm_vec2_dot(line.norm, assemblies[i].articulation_position[articulation_i]->point.pos) + line.C) / norm_len;
+						float cos_val = (v_signed - d_pivot_i) / r;
+						if(cos_val > 1.0f) cos_val = 1.0f;
+						if(cos_val < -1.0f) cos_val = -1.0f;
+
+						theta = alpha_ext - beta + acos(cos_val);
+					}
+				} else {
+					abort();
+				}
+				constraint->used = i+1;
 
 				assert(assemblies[i].articulation_position[articulation_i]->type == ETYPE_POINT);
 				assert(assemblies[j].articulation_position[articulation_j]->type == ETYPE_POINT);
@@ -825,13 +875,13 @@ constraint_matches_j:
 				mat3 transform;
 				glm_mat3_identity(transform);
 
-				glm_translate2d(transform, assemblies[i].articulation_position[articulation_i]->point.pos);
+				glm_translate2d(transform, assemblies[j].articulation_position[articulation_j]->point.pos);
 
 				glm_rotate2d(transform, theta);
 
 				{
 					vec2 negative_translate;
-					glm_vec2_negate_to(assemblies[j].articulation_position[articulation_j]->point.pos, negative_translate);
+					glm_vec2_negate_to(assemblies[i].articulation_position[articulation_i]->point.pos, negative_translate);
 					glm_translate2d(transform, negative_translate);
 				}
 
@@ -888,6 +938,7 @@ constraint_matches_j:
 						abort();
 					}
 				}
+				assemblies[i].fixed = true;
 			}
 		}
 		break;
