@@ -49,24 +49,13 @@ void free_constraints(struct constraints *c) {
 }
 
 
-// @COMPL: We should do something better than this. I don't really know what.
-struct frontier {
-	struct component *elems[128];
-	size_t n;
-};
-
-static bool frontier_scan(struct frontier *frontier, struct component *component) {
-	for(size_t i = 0; i < sizeof(frontier->elems)/sizeof(frontier->elems[0]); i++) {
-		if(frontier->elems[i] == component) return true;
-	}
-
-	return false;
+static bool frontier_scan(struct component *component) {
+	return component->fixed;
 }
 
-static void add_frontier(struct frontier *frontier, struct component *component) {
-	assert(!frontier_scan(frontier, component));
-	assert(frontier->n < 128);
-	frontier->elems[frontier->n++] = component;
+static void add_frontier(struct component *component) {
+	assert(!component->fixed);
+	component->fixed = true;
 }
 
 static void build_angle_point_line(struct drawing *drawing, struct constraint *constraints, size_t index_i, size_t index_j, struct component *local_i, struct component *local_j, struct component *oppo_i) {
@@ -222,20 +211,23 @@ static bool fix_first(struct constraint *constraints, size_t constraints_num, si
 
 static size_t build_triangles(struct constraint *constraints, size_t constraints_num, size_t origin, uint8_t useid, struct subassembly *assembly) {
 	struct solve_step *steps = assembly->steps;
-	struct frontier frontier = {};
 	uint64_t order = 1;
 
 	for(size_t i = 0; i < constraints_num; i++) {
-		if(constraints[i].used) continue;
+		// Reset all the fixed points
+		constraints[i].c1->fixed = false;
+		constraints[i].c2->fixed = false;
 
+		if(constraints[i].used) continue;
 		constraints[i].path[0].i = -1;
 		constraints[i].forward = true;
+
 	}
 
 	constraints[origin].used = useid;
 	constraints[origin].order = order++;
-	add_frontier(&frontier, constraints[origin].c1);
-	add_frontier(&frontier, constraints[origin].c2);
+	add_frontier(constraints[origin].c1);
+	add_frontier(constraints[origin].c2);
 
 	size_t steps_i = 0;
 
@@ -249,15 +241,15 @@ static size_t build_triangles(struct constraint *constraints, size_t constraints
 			struct component *oppo;
 			bool forward;
 
-			if(frontier_scan(&frontier, constraints[i].c1)) {
+			if(frontier_scan(constraints[i].c1)) {
 				oppo = constraints[i].c2;
 				forward = true;
-			} else if(frontier_scan(&frontier, constraints[i].c2)) {
+			} else if(frontier_scan(constraints[i].c2)) {
 				oppo = constraints[i].c1;
 				forward = false;
 			} else continue;
 
-			add_frontier(&frontier, oppo);
+			add_frontier(oppo);
 			constraints[i].order = 0;
 			constraints[i].used = useid;
 
@@ -274,10 +266,10 @@ static size_t build_triangles(struct constraint *constraints, size_t constraints
 			struct component *oppo_i;
 			bool i_forward;
 
-			if(frontier_scan(&frontier, constraints[i].c1)) {
+			if(frontier_scan(constraints[i].c1)) {
 				oppo_i = constraints[i].c2;
 				i_forward = true;
-			} else if(frontier_scan(&frontier, constraints[i].c2)) {
+			} else if(frontier_scan(constraints[i].c2)) {
 				oppo_i = constraints[i].c1;
 				i_forward = false;
 			} else continue;
@@ -288,10 +280,10 @@ static size_t build_triangles(struct constraint *constraints, size_t constraints
 				struct component *oppo_j;
 				bool j_forward;
 
-				if(frontier_scan(&frontier, constraints[j].c1)) {
+				if(frontier_scan(constraints[j].c1)) {
 					oppo_j = constraints[j].c2;
 					j_forward = true;
-				} else if(frontier_scan(&frontier, constraints[j].c2)) {
+				} else if(frontier_scan(constraints[j].c2)) {
 					oppo_j = constraints[j].c1;
 					j_forward = false;
 				} else continue;
@@ -311,7 +303,7 @@ static size_t build_triangles(struct constraint *constraints, size_t constraints
 					} else continue;
 				}
 
-				add_frontier(&frontier, oppo_i);
+				add_frontier(oppo_i);
 				constraints[i].used = useid;
 				constraints[i].order = order++;
 				constraints[j].used = useid;
@@ -337,14 +329,14 @@ candidate_found:
 	for(size_t i = 0; i < constraints_num; i++) {
 		if(constraints[i].used == useid) continue;
 
-		if(frontier_scan(&frontier, constraints[i].c1)) {
+		if(frontier_scan(constraints[i].c1)) {
 			for(size_t j = 0; j < assembly->articulation_num; j++) {
 				if(assembly->articulation[j] == constraints[i].c1) {
 					goto nomatch;
 				}
 			}
 			assembly->articulation[assembly->articulation_num++] = constraints[i].c1;
-		} else if(frontier_scan(&frontier, constraints[i].c2)) {
+		} else if(frontier_scan(constraints[i].c2)) {
 			for(size_t j = 0; j < assembly->articulation_num; j++) {
 				if(assembly->articulation[j] == constraints[i].c2) {
 					goto nomatch;

@@ -20,6 +20,8 @@ struct component {
 	double max;
 	bool min_max_init;
 	bool drawn;
+
+	bool fixed;
 };
 
 struct alias {
