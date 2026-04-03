@@ -209,7 +209,10 @@ static bool fix_first(struct constraint *constraints, size_t constraints_num, si
 	return false;
 }
 
-static size_t build_triangles(struct constraint *constraints, size_t constraints_num, size_t origin, uint8_t useid, struct subassembly *assembly) {
+static size_t build_triangles(struct constraints *constraints_in, struct component **components, size_t origin, uint8_t useid, struct subassembly *assembly) {
+	struct constraint *constraints = constraints_in->elements;
+	size_t constraints_num = constraints_in->length;
+
 	struct solve_step *steps = assembly->steps;
 	uint64_t order = 1;
 
@@ -232,6 +235,9 @@ static size_t build_triangles(struct constraint *constraints, size_t constraints
 	size_t steps_i = 0;
 
 	while(true) {
+		// 0 distance PP_DISTANCE fixes the point without anything else
+		// @INVEST: Is this really required anymore? I thought we had solved
+		// this with the alias system?
 		for(size_t i = 0; i < constraints_num; i++) {
 			if(constraints[i].used) continue;
 
@@ -672,6 +678,14 @@ static void draw_solution(struct constraint *constraints, size_t fix, struct sol
 	}
 }
 
+int unt64_t_compar(const void *a, const void *b) {
+	uint64_t x = *(const uint64_t*)a;
+	uint64_t y = *(const uint64_t*)b;
+
+	if(x == y) return 0;
+	return ((x > y) * 2) - 1;
+}
+
 bool solve_constraints(struct constraints *constraints, struct drawing *drawing, struct subassembly *assemblies, size_t *assemblies_num) {
 	*assemblies_num = 0;
 	// Replace all the aliased points with the point they point to
@@ -685,15 +699,31 @@ bool solve_constraints(struct constraints *constraints, struct drawing *drawing,
 		}
 	}
 
+	// Collect all the components into a single set
+	struct component **components = malloc(sizeof(struct component*) * constraints->length * 2);
+	size_t component_num = 0;
+
+	for(size_t i = 0; i < constraints->length; i++) {
+		components[component_num++] = constraints->elements[i].c1;
+		components[component_num++] = constraints->elements[i].c2;
+	}
+
+	qsort(components, component_num, sizeof(struct component*), unt64_t_compar);
+
+	size_t dest_num = 1;
+	for(size_t i = 1; i < component_num; i++) {
+		if(components[dest_num-1] != components[i])
+			components[dest_num++] = components[i];
+	}
+
 	// Pick some point point distance constraint as the base
 	size_t fix;
-
 	while(fix_first(constraints->elements, constraints->length, &fix)) {
 		// Build triangles on that root
 		assemblies[*assemblies_num].steps = malloc(sizeof(struct solve_step) * constraints->length);
 		assemblies[*assemblies_num].articulation = malloc(sizeof(struct component*) * constraints->length);
 		assemblies[*assemblies_num].articulation_position = malloc(sizeof(struct element*) * constraints->length);
-		assemblies[*assemblies_num].steps_num = build_triangles(constraints->elements, constraints->length, fix, *assemblies_num+1, &assemblies[*assemblies_num]);
+		assemblies[*assemblies_num].steps_num = build_triangles(constraints, components, fix, *assemblies_num+1, &assemblies[*assemblies_num]);
 		assemblies[*assemblies_num].fix = fix;
 
 		// printf("Assembly %ld\n", *assemblies_num);
