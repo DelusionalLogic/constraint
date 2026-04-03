@@ -209,22 +209,91 @@ static bool fix_first(struct constraint *constraints, size_t constraints_num, si
 	return false;
 }
 
-static size_t build_triangles(struct constraints *constraints_in, struct component **components, size_t origin, uint8_t useid, struct subassembly *assembly) {
+static bool try_fix_component(struct constraints *constraints_in, struct component *c, struct constraint **not_angle, bool *f1, struct constraint **possibly_angle, bool *f2) {
+	struct constraint *constraints = constraints_in->elements;
+	size_t constraints_num = constraints_in->length;
+
+	// Find something that is not an angle
+	for(size_t i = 0; i < constraints_num; i++) {
+		if(constraints[i].used) continue;
+		if(constraints[i].type == CT_LINE_LINE_ANGLE) continue;
+
+		bool f;
+		struct component *oppo;
+		if(constraints[i].c1 == c) {
+			oppo = constraints[i].c1;
+			f = false;
+		} else if(constraints[i].c2 == c) {
+			oppo = constraints[i].c2;
+			f = true;
+		} else {
+			continue;
+		}
+
+		if(!oppo->fixed) continue;
+
+		if(constraints[i].type != CT_LINE_LINE_ANGLE) {
+			*not_angle = &constraints[i];
+			*f1 = f;
+			break;
+		}
+	}
+
+	// No way to fix this component was found
+	if(*not_angle == NULL) return false;
+
+	// Find something that is compatible with the other constraint,
+	// possibly a transferred angle
+	for(size_t i = 0; i < constraints_num; i++) {
+		if(constraints[i].used) continue;
+		// We already selected this one, we can't use it again
+		if(&constraints[i] == *not_angle) continue;
+
+		bool f;
+		struct component *oppo;
+		if(constraints[i].c1 == c) {
+			oppo = constraints[i].c1;
+			f = false;
+		} else if(constraints[i].c2 == c) {
+			oppo = constraints[i].c2;
+			f = true;
+		} else {
+			continue;
+		}
+
+		if(!oppo->fixed) continue;
+
+		if(constraints[i].type == CT_LINE_LINE_ANGLE) {
+			if(!find_angle(constraints, constraints_num, f ? constraints[i].c2 : constraints[i].c1, f1 ? (*not_angle)->c2 : (*not_angle)->c1, constraints[i].path)) continue;
+		}
+
+		*possibly_angle = &constraints[i];
+		*f2 = f;
+	}
+
+	// No way to fix this component was found
+	if(*possibly_angle == NULL) return false;;
+
+	return true;
+}
+
+static size_t build_triangles(struct constraints *constraints_in, struct component **components, size_t component_num, size_t origin, uint8_t useid, struct subassembly *assembly) {
 	struct constraint *constraints = constraints_in->elements;
 	size_t constraints_num = constraints_in->length;
 
 	struct solve_step *steps = assembly->steps;
 	uint64_t order = 1;
 
-	for(size_t i = 0; i < constraints_num; i++) {
+	for(size_t i = 0; i < component_num; i++) {
 		// Reset all the fixed points
-		constraints[i].c1->fixed = false;
-		constraints[i].c2->fixed = false;
+		components[i]->fixed = false;
+		components[i]->fixed = false;
+	}
 
+	for(size_t i = 0; i < constraints_num; i++) {
 		if(constraints[i].used) continue;
 		constraints[i].path[0].i = -1;
 		constraints[i].forward = true;
-
 	}
 
 	constraints[origin].used = useid;
@@ -266,62 +335,85 @@ static size_t build_triangles(struct constraints *constraints_in, struct compone
 			steps_i++;
 		}
 
-		for(size_t i = 0; i < constraints_num; i++) {
-			if(constraints[i].used) continue;
+		for(size_t i = 0; i < component_num; i++) {
+			// If a component was already fixed, we don't need to do anything special
+			if(components[i]->fixed) continue;
 
-			struct component *oppo_i;
-			bool i_forward;
+			struct constraint *not_angle = NULL;
+			bool f1;
+			struct constraint *possibly_angle = NULL;
+			bool f2;
 
-			if(frontier_scan(constraints[i].c1)) {
-				oppo_i = constraints[i].c2;
-				i_forward = true;
-			} else if(frontier_scan(constraints[i].c2)) {
-				oppo_i = constraints[i].c1;
-				i_forward = false;
-			} else continue;
-
-			for(size_t j = i+1; j < constraints_num; j++) {
-				if(constraints[j].used) continue;
-
-				struct component *oppo_j;
-				bool j_forward;
-
-				if(frontier_scan(constraints[j].c1)) {
-					oppo_j = constraints[j].c2;
-					j_forward = true;
-				} else if(frontier_scan(constraints[j].c2)) {
-					oppo_j = constraints[j].c1;
-					j_forward = false;
-				} else continue;
-
-				// One of the constraints can't be an angle one
-				if(constraints[i].type == CT_LINE_LINE_ANGLE && constraints[j].type == CT_LINE_LINE_ANGLE) continue;
-
-				if(oppo_i != oppo_j) {
-					if(constraints[i].type == CT_LINE_LINE_ANGLE) {
-						if(!find_angle(constraints, constraints_num, oppo_i, oppo_j, constraints[i].path)) continue;
-
-						oppo_i = oppo_j;
-					} else if(constraints[j].type == CT_LINE_LINE_ANGLE) {
-						if(!find_angle(constraints, constraints_num, oppo_j, oppo_i, constraints[j].path)) continue;
-
-						oppo_j = oppo_i;
-					} else continue;
-				}
-
-				add_frontier(oppo_i);
-				constraints[i].used = useid;
-				constraints[i].order = order++;
-				constraints[j].used = useid;
-				constraints[j].order = order++;
-				steps[steps_i].i = i;
-				steps[steps_i].j = j;
-				steps[steps_i].i_forward = i_forward;
-				steps[steps_i].j_forward = j_forward;
+			if(try_fix_component(constraints_in, components[i], &not_angle, &f1, &possibly_angle, &f2)) {
+				not_angle->used = useid;
+				not_angle->order = order++;
+				possibly_angle->used = useid;
+				possibly_angle->order = order++;
+				steps[steps_i].i = not_angle - constraints;
+				steps[steps_i].j = possibly_angle - constraints;
+				steps[steps_i].i_forward = f1;
+				steps[steps_i].j_forward = f2;
 				steps_i++;
 				goto candidate_found;
 			}
 		}
+
+		// for(size_t i = 0; i < constraints_num; i++) {
+		// 	if(constraints[i].used) continue;
+
+		// 	struct component *oppo_i;
+		// 	bool i_forward;
+
+		// 	if(frontier_scan(constraints[i].c1)) {
+		// 		oppo_i = constraints[i].c2;
+		// 		i_forward = true;
+		// 	} else if(frontier_scan(constraints[i].c2)) {
+		// 		oppo_i = constraints[i].c1;
+		// 		i_forward = false;
+		// 	} else continue;
+
+		// 	for(size_t j = i+1; j < constraints_num; j++) {
+		// 		if(constraints[j].used) continue;
+
+		// 		struct component *oppo_j;
+		// 		bool j_forward;
+
+		// 		if(frontier_scan(constraints[j].c1)) {
+		// 			oppo_j = constraints[j].c2;
+		// 			j_forward = true;
+		// 		} else if(frontier_scan(constraints[j].c2)) {
+		// 			oppo_j = constraints[j].c1;
+		// 			j_forward = false;
+		// 		} else continue;
+
+		// 		// One of the constraints can't be an angle one
+		// 		if(constraints[i].type == CT_LINE_LINE_ANGLE && constraints[j].type == CT_LINE_LINE_ANGLE) continue;
+
+		// 		if(oppo_i != oppo_j) {
+		// 			if(constraints[i].type == CT_LINE_LINE_ANGLE) {
+		// 				if(!find_angle(constraints, constraints_num, oppo_i, oppo_j, constraints[i].path)) continue;
+
+		// 				oppo_i = oppo_j;
+		// 			} else if(constraints[j].type == CT_LINE_LINE_ANGLE) {
+		// 				if(!find_angle(constraints, constraints_num, oppo_j, oppo_i, constraints[j].path)) continue;
+
+		// 				oppo_j = oppo_i;
+		// 			} else continue;
+		// 		}
+
+		// 		add_frontier(oppo_i);
+		// 		constraints[i].used = useid;
+		// 		constraints[i].order = order++;
+		// 		constraints[j].used = useid;
+		// 		constraints[j].order = order++;
+		// 		steps[steps_i].i = i;
+		// 		steps[steps_i].j = j;
+		// 		steps[steps_i].i_forward = i_forward;
+		// 		steps[steps_i].j_forward = j_forward;
+		// 		steps_i++;
+		// 		goto candidate_found;
+		// 	}
+		// }
 		// No candidate found
 		break;
 
@@ -682,8 +774,7 @@ int unt64_t_compar(const void *a, const void *b) {
 	uint64_t x = *(const uint64_t*)a;
 	uint64_t y = *(const uint64_t*)b;
 
-	if(x == y) return 0;
-	return ((x > y) * 2) - 1;
+	return (x > y) - (x < y);
 }
 
 bool solve_constraints(struct constraints *constraints, struct drawing *drawing, struct subassembly *assemblies, size_t *assemblies_num) {
@@ -723,7 +814,7 @@ bool solve_constraints(struct constraints *constraints, struct drawing *drawing,
 		assemblies[*assemblies_num].steps = malloc(sizeof(struct solve_step) * constraints->length);
 		assemblies[*assemblies_num].articulation = malloc(sizeof(struct component*) * constraints->length);
 		assemblies[*assemblies_num].articulation_position = malloc(sizeof(struct element*) * constraints->length);
-		assemblies[*assemblies_num].steps_num = build_triangles(constraints, components, fix, *assemblies_num+1, &assemblies[*assemblies_num]);
+		assemblies[*assemblies_num].steps_num = build_triangles(constraints, components, dest_num, fix, *assemblies_num+1, &assemblies[*assemblies_num]);
 		assemblies[*assemblies_num].fix = fix;
 
 		// printf("Assembly %ld\n", *assemblies_num);
