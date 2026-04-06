@@ -29,6 +29,7 @@ int main(int argc, char *argv[]) {
 		free_constraints(&constraints);
 	}
 
+	memset(assemblies, 0, sizeof(assemblies));
 	{
 		printf("Triangle by 2 angles and a distance\n");
 		struct constraints constraints = {};
@@ -66,6 +67,7 @@ int main(int argc, char *argv[]) {
 		free_constraints(&constraints);
 	}
 
+	memset(assemblies, 0, sizeof(assemblies));
 	{
 		printf("Two triangles sharing a point one defined by angles\n");
 		struct constraints constraints = {};
@@ -115,6 +117,7 @@ int main(int argc, char *argv[]) {
 		free_constraints(&constraints);
 	}
 
+	memset(assemblies, 0, sizeof(assemblies));
 	{
 		printf("Two triangles sharing a point with an angle constrained base\n");
 		struct constraints constraints = {};

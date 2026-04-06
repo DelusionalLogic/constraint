@@ -221,10 +221,10 @@ static bool try_fix_component(struct constraints *constraints_in, struct compone
 		bool f;
 		struct component *oppo;
 		if(constraints[i].c1 == c) {
-			oppo = constraints[i].c1;
+			oppo = constraints[i].c2;
 			f = false;
 		} else if(constraints[i].c2 == c) {
-			oppo = constraints[i].c2;
+			oppo = constraints[i].c1;
 			f = true;
 		} else {
 			continue;
@@ -232,30 +232,29 @@ static bool try_fix_component(struct constraints *constraints_in, struct compone
 
 		if(!oppo->fixed) continue;
 
-		if(constraints[i].type != CT_LINE_LINE_ANGLE) {
-			*not_angle = &constraints[i];
-			*f1 = f;
-			break;
-		}
+		*not_angle = &constraints[i];
+		*f1 = f;
+		break;
 	}
 
 	// No way to fix this component was found
 	if(*not_angle == NULL) return false;
 
-	// Find something that is compatible with the other constraint,
-	// possibly a transferred angle
+	// Look for another distance constraint
 	for(size_t i = 0; i < constraints_num; i++) {
 		if(constraints[i].used) continue;
+		if(constraints[i].type == CT_LINE_LINE_ANGLE) continue;
+
 		// We already selected this one, we can't use it again
 		if(&constraints[i] == *not_angle) continue;
 
 		bool f;
 		struct component *oppo;
 		if(constraints[i].c1 == c) {
-			oppo = constraints[i].c1;
+			oppo = constraints[i].c2;
 			f = false;
 		} else if(constraints[i].c2 == c) {
-			oppo = constraints[i].c2;
+			oppo = constraints[i].c1;
 			f = true;
 		} else {
 			continue;
@@ -263,16 +262,52 @@ static bool try_fix_component(struct constraints *constraints_in, struct compone
 
 		if(!oppo->fixed) continue;
 
-		if(constraints[i].type == CT_LINE_LINE_ANGLE) {
-			if(!find_angle(constraints, constraints_num, f ? constraints[i].c2 : constraints[i].c1, f1 ? (*not_angle)->c2 : (*not_angle)->c1, constraints[i].path)) continue;
-		}
-
 		*possibly_angle = &constraints[i];
 		*f2 = f;
+		break;
+	}
+
+	if(*possibly_angle == NULL) {
+		// We can't find any distance constraint to use, look for an angle
+		// constraint
+		for(size_t i = 0; i < constraints_num; i++) {
+			if(constraints[i].used) continue;
+			if(constraints[i].type != CT_LINE_LINE_ANGLE) continue;
+
+			// We already selected this one, we can't use it again
+			if(&constraints[i] == *not_angle) continue;
+
+			// Unlike for distance constraints, we support doing a walk through
+			// angle constraints that relate to the same singular point. This
+			// means we have to process ALL the currently unused angle
+			// constraints where one half is fixed.
+			bool f;
+			struct component *oppo;
+			if(constraints[i].c1->fixed) {
+				oppo = constraints[i].c2;
+				f = true;
+			} else if(constraints[i].c2->fixed) {
+				oppo = constraints[i].c1;
+				f = false;
+			} else {
+				continue;
+			}
+
+			if(oppo -> fixed) continue;
+			assert(!oppo->fixed);
+
+			if(oppo != c) {
+				if(!find_angle(constraints, constraints_num, oppo, c, constraints[i].path))
+					continue;
+			}
+
+			*possibly_angle = &constraints[i];
+			*f2 = f;
+		}
 	}
 
 	// No way to fix this component was found
-	if(*possibly_angle == NULL) return false;;
+	if(*possibly_angle == NULL) return false;
 
 	return true;
 }
@@ -286,7 +321,6 @@ static size_t build_triangles(struct constraints *constraints_in, struct compone
 
 	for(size_t i = 0; i < component_num; i++) {
 		// Reset all the fixed points
-		components[i]->fixed = false;
 		components[i]->fixed = false;
 	}
 
@@ -345,6 +379,7 @@ static size_t build_triangles(struct constraints *constraints_in, struct compone
 			bool f2;
 
 			if(try_fix_component(constraints_in, components[i], &not_angle, &f1, &possibly_angle, &f2)) {
+				add_frontier(components[i]);
 				not_angle->used = useid;
 				not_angle->order = order++;
 				possibly_angle->used = useid;
@@ -358,62 +393,6 @@ static size_t build_triangles(struct constraints *constraints_in, struct compone
 			}
 		}
 
-		// for(size_t i = 0; i < constraints_num; i++) {
-		// 	if(constraints[i].used) continue;
-
-		// 	struct component *oppo_i;
-		// 	bool i_forward;
-
-		// 	if(frontier_scan(constraints[i].c1)) {
-		// 		oppo_i = constraints[i].c2;
-		// 		i_forward = true;
-		// 	} else if(frontier_scan(constraints[i].c2)) {
-		// 		oppo_i = constraints[i].c1;
-		// 		i_forward = false;
-		// 	} else continue;
-
-		// 	for(size_t j = i+1; j < constraints_num; j++) {
-		// 		if(constraints[j].used) continue;
-
-		// 		struct component *oppo_j;
-		// 		bool j_forward;
-
-		// 		if(frontier_scan(constraints[j].c1)) {
-		// 			oppo_j = constraints[j].c2;
-		// 			j_forward = true;
-		// 		} else if(frontier_scan(constraints[j].c2)) {
-		// 			oppo_j = constraints[j].c1;
-		// 			j_forward = false;
-		// 		} else continue;
-
-		// 		// One of the constraints can't be an angle one
-		// 		if(constraints[i].type == CT_LINE_LINE_ANGLE && constraints[j].type == CT_LINE_LINE_ANGLE) continue;
-
-		// 		if(oppo_i != oppo_j) {
-		// 			if(constraints[i].type == CT_LINE_LINE_ANGLE) {
-		// 				if(!find_angle(constraints, constraints_num, oppo_i, oppo_j, constraints[i].path)) continue;
-
-		// 				oppo_i = oppo_j;
-		// 			} else if(constraints[j].type == CT_LINE_LINE_ANGLE) {
-		// 				if(!find_angle(constraints, constraints_num, oppo_j, oppo_i, constraints[j].path)) continue;
-
-		// 				oppo_j = oppo_i;
-		// 			} else continue;
-		// 		}
-
-		// 		add_frontier(oppo_i);
-		// 		constraints[i].used = useid;
-		// 		constraints[i].order = order++;
-		// 		constraints[j].used = useid;
-		// 		constraints[j].order = order++;
-		// 		steps[steps_i].i = i;
-		// 		steps[steps_i].j = j;
-		// 		steps[steps_i].i_forward = i_forward;
-		// 		steps[steps_i].j_forward = j_forward;
-		// 		steps_i++;
-		// 		goto candidate_found;
-		// 	}
-		// }
 		// No candidate found
 		break;
 

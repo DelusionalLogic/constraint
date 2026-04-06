@@ -1,4 +1,5 @@
 #include "cad.h"
+#include "cad/debug.h"
 
 void draw_from_constraints(struct constraints *c, struct topology *t, struct canvas *cv) {
 	struct drawing drawing = {};
@@ -18,6 +19,7 @@ void draw_from_constraints(struct constraints *c, struct topology *t, struct can
 	free(params);
 
 	reconstruct_drawing(c, assemblies, &assemblies_num);
+	print_subassemblies(c, assemblies, assemblies_num);
 
 	begin_drawing(cv);
 	draw_topology(cv, t);
