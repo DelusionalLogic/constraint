@@ -10,6 +10,11 @@
 		y = tmp; \
 	}while(0)
 
+#define CONTAINER_OF(ptr, Type, member) ({ \
+		const typeof(((Type*)0)->member) *__mptr = (ptr); \
+		(Type*)((char*)__mptr - offsetof(Type, member)); \
+	})
+
 char *constraint_type_name[] = {
 	[CT_POINT_POINT_DISTANCE] = "Point Point Distance",
 	[CT_POINT_LINE_DISTANCE] = "Point Line Distance",
@@ -192,8 +197,11 @@ static bool find_angle(struct constraint *constraints, size_t constraints_num, s
 struct solve_step {
 	size_t i;
 	size_t j;
+	size_t k;
 	bool i_forward;
 	bool j_forward;
+	bool k_forward;
+	struct subassembly *assembly;
 };
 
 static bool fix_first(struct constraint *constraints, size_t constraints_num, size_t *c) {
@@ -201,6 +209,8 @@ static bool fix_first(struct constraint *constraints, size_t constraints_num, si
 		if(constraints[i].used) continue;
 		if(constraints[i].type != CT_POINT_POINT_DISTANCE) continue;
 		if(constraints[i].v == 0.0) continue;
+		if(constraints[i].c1->ein != NULL) continue;
+		if(constraints[i].c2->ein != NULL) continue;
 
 		*c = i;
 		return true;
@@ -209,11 +219,15 @@ static bool fix_first(struct constraint *constraints, size_t constraints_num, si
 	return false;
 }
 
-static bool try_fix_component(struct constraints *constraints_in, struct component *c, struct constraint **not_angle, bool *f1, struct constraint **possibly_angle, bool *f2) {
+static bool try_fix_component(struct constraints *constraints_in, struct component *c, struct constraint **not_angle, bool *f1, struct constraint **possibly_angle, bool *f2, struct constraint **second_not_angle, bool *f3) {
+	assert(!c->fixed);
+
 	struct constraint *constraints = constraints_in->elements;
 	size_t constraints_num = constraints_in->length;
 
 	// Find something that is not an angle
+	// Even though this also handles assemblies, we only check again this exact
+	// component. The caller will call us for every component in the assembly.
 	for(size_t i = 0; i < constraints_num; i++) {
 		if(constraints[i].used) continue;
 		if(constraints[i].type == CT_LINE_LINE_ANGLE) continue;
@@ -240,6 +254,39 @@ static bool try_fix_component(struct constraints *constraints_in, struct compone
 	// No way to fix this component was found
 	if(*not_angle == NULL) return false;
 
+	if(c->ein != NULL) {
+		// Find a second non-angle constraint for something in our assembly
+		for(size_t i = 0; i < constraints_num; i++) {
+			if(constraints[i].used) continue;
+			if(constraints[i].type == CT_LINE_LINE_ANGLE) continue;
+
+			// We already selected this one, we can't use it again
+			if(&constraints[i] == *not_angle) continue;
+
+			// Find the side that's fixed
+			bool f;
+			struct component *dest;
+			if(constraints[i].c1->fixed) {
+				dest = constraints[i].c2;
+				f = true;
+			} else if(constraints[i].c2->fixed) {
+				dest = constraints[i].c1;
+				f = false;
+			} else {
+				continue;
+			}
+
+			// It has to relate to something on the same assembly as c
+			if(dest->ein != c->ein) continue;
+
+			*second_not_angle = &constraints[i];
+			*f3 = f;
+			break;
+		}
+
+		if(*second_not_angle == NULL) return false;
+	}
+
 	// Look for another distance constraint
 	for(size_t i = 0; i < constraints_num; i++) {
 		if(constraints[i].used) continue;
@@ -247,6 +294,7 @@ static bool try_fix_component(struct constraints *constraints_in, struct compone
 
 		// We already selected this one, we can't use it again
 		if(&constraints[i] == *not_angle) continue;
+		if(c->ein != NULL && &constraints[i] == *second_not_angle) continue;
 
 		bool f;
 		struct component *oppo;
@@ -276,30 +324,46 @@ static bool try_fix_component(struct constraints *constraints_in, struct compone
 
 			// We already selected this one, we can't use it again
 			if(&constraints[i] == *not_angle) continue;
+			if(c->ein != NULL && &constraints[i] == *second_not_angle) continue;
 
+			// @CLEANUP Look into removing this "angle walking". I don't think
+			// we need it if we have proper subassembly inclusion
 			// Unlike for distance constraints, we support doing a walk through
 			// angle constraints that relate to the same singular point. This
 			// means we have to process ALL the currently unused angle
 			// constraints where one half is fixed.
 			bool f;
-			struct component *oppo;
+			struct component *dest;
 			if(constraints[i].c1->fixed) {
-				oppo = constraints[i].c2;
+				dest = constraints[i].c2;
 				f = true;
+
+				// Since C is supposedly current unfixed, the fixed side can't
+				// be part of the same assembly
+				assert(constraints[i].c1->ein != c->ein);
 			} else if(constraints[i].c2->fixed) {
-				oppo = constraints[i].c1;
+				dest = constraints[i].c1;
 				f = false;
+
+				// Since C is supposedly current unfixed, the fixed side can't
+				// be part of the same assembly
+				assert(constraints[i].c2->ein != c->ein);
 			} else {
 				continue;
 			}
 
-			if(oppo -> fixed) continue;
-			assert(!oppo->fixed);
-
-			if(oppo != c) {
-				if(!find_angle(constraints, constraints_num, oppo, c, constraints[i].path))
-					continue;
+			if(c->ein == NULL) {
+				if(dest != c) {
+					if(!find_angle(constraints, constraints_num, dest, c, constraints[i].path))
+						continue;
+				}
+			} else {
+				// We don't do the whole walking thing if we're solving for assemblies
+				if(c->ein != dest->ein) continue;
 			}
+
+			// Is this actually correct?
+			assert(!dest->fixed);
 
 			*possibly_angle = &constraints[i];
 			*f2 = f;
@@ -332,8 +396,19 @@ static size_t build_triangles(struct constraints *constraints_in, struct compone
 
 	constraints[origin].used = useid;
 	constraints[origin].order = order++;
+
+	// You can't fix a subcomponent, as it has too much freedom
+	assert(constraints[origin].c1->in == NULL);
+	assert(constraints[origin].c2->in == NULL);
+	assert(constraints[origin].c1->ein == NULL);
+	assert(constraints[origin].c2->ein == NULL);
+
 	add_frontier(constraints[origin].c1);
 	add_frontier(constraints[origin].c2);
+	constraints[origin].c1->in = assembly;
+	constraints[origin].c2->in = assembly;
+	constraints[origin].c1->ein = assembly;
+	constraints[origin].c2->ein = assembly;
 
 	size_t steps_i = 0;
 
@@ -341,11 +416,17 @@ static size_t build_triangles(struct constraints *constraints_in, struct compone
 		// 0 distance PP_DISTANCE fixes the point without anything else
 		// @INVEST: Is this really required anymore? I thought we had solved
 		// this with the alias system?
+		// @HACK Really all of this should go in try_fix_component since we
+		// need an additional constraint to fix rotation of assemblies
 		for(size_t i = 0; i < constraints_num; i++) {
 			if(constraints[i].used) continue;
 
 			if(constraints[i].type != CT_POINT_POINT_DISTANCE) continue;
 			if(constraints[i].v != 0.0) continue;
+
+			// We'll handle this elsewhere?
+			if(constraints[i].c1->ein != NULL) continue;
+			if(constraints[i].c2->ein != NULL) continue;
 
 			struct component *oppo;
 			bool forward;
@@ -359,9 +440,13 @@ static size_t build_triangles(struct constraints *constraints_in, struct compone
 			} else continue;
 
 			add_frontier(oppo);
+			assert(oppo->in == NULL);
+			oppo->in = assembly;
+			oppo->ein = assembly;
 			constraints[i].order = 0;
 			constraints[i].used = useid;
 
+			steps[steps_i].assembly = assembly;
 			steps[steps_i].i = i;
 			steps[steps_i].j = i;
 			steps[steps_i].i_forward = forward;
@@ -370,7 +455,7 @@ static size_t build_triangles(struct constraints *constraints_in, struct compone
 		}
 
 		for(size_t i = 0; i < component_num; i++) {
-			// If a component was already fixed, we don't need to do anything special
+			// If a component was already fixed, we don't need to do anything
 			if(components[i]->fixed) continue;
 
 			struct constraint *not_angle = NULL;
@@ -378,16 +463,44 @@ static size_t build_triangles(struct constraints *constraints_in, struct compone
 			struct constraint *possibly_angle = NULL;
 			bool f2;
 
-			if(try_fix_component(constraints_in, components[i], &not_angle, &f1, &possibly_angle, &f2)) {
-				add_frontier(components[i]);
+			struct constraint *second_not_angle = NULL;
+			bool f3;
+
+			if(try_fix_component(constraints_in, components[i], &not_angle, &f1, &possibly_angle, &f2, &second_not_angle, &f3)) {
+				struct subassembly *sub = components[i]->ein;
+				if(sub == NULL) {
+					add_frontier(components[i]);
+					assert(components[i]->in == NULL);
+					components[i]->in = assembly;
+					components[i]->ein = assembly;
+				} else {
+					// We've fixed the subcomponent, so we have to fix the whole thing
+					for(size_t j = 0; j < component_num; j++) {
+						if(components[j]->ein != sub) continue;
+
+						add_frontier(components[j]);
+						components[j]->ein = assembly;
+					}
+				}
+
 				not_angle->used = useid;
 				not_angle->order = order++;
 				possibly_angle->used = useid;
 				possibly_angle->order = order++;
+
+				steps[steps_i].assembly = second_not_angle == NULL ? NULL : sub;
 				steps[steps_i].i = not_angle - constraints;
 				steps[steps_i].j = possibly_angle - constraints;
 				steps[steps_i].i_forward = f1;
 				steps[steps_i].j_forward = f2;
+
+				if(second_not_angle != NULL) {
+					second_not_angle->used = useid;
+					second_not_angle->order = order++;
+					steps[steps_i].k = second_not_angle - constraints;
+					steps[steps_i].k_forward = f3;
+				}
+
 				steps_i++;
 				goto candidate_found;
 			}
@@ -428,13 +541,128 @@ nomatch:
 	return steps_i;
 }
 
-static void draw_solution(struct constraint *constraints, size_t fix, struct solve_step* steps, size_t steps_num, struct drawing *drawing) {
+static void draw_point_from_2_distance(struct drawing *drawing, struct constraint *constraints, size_t i, size_t j, struct component *local_i, struct component *local_j, struct element **e, bool shown) {
+	struct element *d1 = insert_cmd(drawing, (struct command){
+		.op = CMD_VALUE_INPUT,
+		.index = i,
+		.dir = constraints[i].forward,
+		.result.type = ETYPE_VALUE,
+	});
+
+	struct element *d2 = insert_cmd(drawing, (struct command){
+		.op = CMD_VALUE_INPUT,
+		.index = j,
+		.dir = constraints[j].forward,
+		.result.type = ETYPE_VALUE,
+	});
+
+	struct element *c1 = insert_cmd(drawing, (struct command){
+		.op = CMD_CIRCLE_CENTER_RADIUS,
+		.hidden = !shown,
+		.result.type = ETYPE_CIRCLE,
+		.arg1 = local_i->e,
+		.arg2 = d1,
+	});
+
+	struct element *c2 = insert_cmd(drawing, (struct command){
+		.op = CMD_CIRCLE_CENTER_RADIUS,
+		.hidden = !shown,
+		.result.type = ETYPE_CIRCLE,
+		.arg1 = local_j->e,
+		.arg2 = d2,
+	});
+
+	*e = insert_cmd(drawing, (struct command){
+		.op = CMD_POINT_CIRCLE_CIRCLE,
+		.hidden = !shown,
+		.result.type = ETYPE_POINT,
+		.arg1 = c1,
+		.arg2 = c2,
+	});
+}
+
+static void draw_for_subassembly(struct constraint *constraints, size_t fix, struct solve_step *step, struct drawing *drawing, struct subassembly *assembly) {
+	struct component *local_i;
+	struct component *oppo_i;
+	if(step->i_forward) {
+		local_i = constraints[step->i].c1;
+		oppo_i = constraints[step->i].c2;
+	} else {
+		local_i = constraints[step->i].c2;
+		oppo_i = constraints[step->i].c1;
+	}
+
+	struct component *local_j;
+	struct component *oppo_j;
+	if(step->j_forward) {
+		local_j = constraints[step->j].c1;
+		oppo_j = constraints[step->j].c2;
+	} else {
+		local_j = constraints[step->j].c2;
+		oppo_j = constraints[step->j].c1;
+	}
+
+	struct component *local_k;
+	struct component *oppo_k;
+	if(step->k_forward) {
+		local_k = constraints[step->k].c1;
+		oppo_k = constraints[step->k].c2;
+	} else {
+		local_k = constraints[step->k].c2;
+		oppo_k = constraints[step->k].c1;
+	}
+
+	// The local_ side is the "outer" (more leaf) component
+	// By the construction we know that i and k are never angle constraints.
+
+	// @HACK for now just solve the simple case where oppo_i and oppo_k are the
+	// same component. Technically I think we should be able to solve other
+	// cases as well, I just don't want to do the math.
+	assert(oppo_i == oppo_k);
+
+	// @HACK Let's only solve for an explicit angle for now
+	assert(constraints[step->j].type == CT_LINE_LINE_ANGLE);
+
+	// The point we share with the subassembly
+	struct element *p = NULL;
+	draw_point_from_2_distance(drawing, constraints, step->i, step->k, local_i, local_k, &p, false);
+	assert(p != NULL);
+
+	// The line that matches the angle
+	struct element *theta = insert_cmd(drawing, (struct command){
+		.op = CMD_VALUE_INPUT,
+		.index = step->j,
+		.dir = constraints[step->j].forward,
+		.result.type = ETYPE_VALUE,
+	});
+	struct element *l = insert_cmd(drawing, (struct command){
+		.op = CMD_LINE_POINT_LINE_ANGLE,
+		.hidden = !oppo_j->show_when_placed,
+		.result.type = ETYPE_LINE,
+		.arg1 = p,
+		.arg2 = local_j->e,
+		.arg3 = theta,
+	});
+	assert(l != NULL);
+
+	insert_cmd(drawing, (struct command){
+		.op = CMD_IMPORT_POINT_LINE,
+		.arg1 = p,
+		.arg2 = l,
+		.d = step->assembly,
+		.attachp = oppo_i->e,
+		.attachl = oppo_k->e,
+	});
+}
+
+static void draw_solution(struct constraint *constraints, size_t fix, struct solve_step* steps, size_t steps_num, struct drawing *drawing, struct subassembly *assembly) {
 	{
 		constraints[fix].c1->e = insert_cmd(drawing, (struct command){
 			.op = CMD_ORIGIN,
 			.hidden = true,
 			.result.type = ETYPE_POINT,
 		});
+		assembly->first_command = drawing->tail;
 
 		struct element *xaxis = insert_cmd(drawing, (struct command){
 			.op = CMD_LINE_X,
@@ -468,6 +696,11 @@ static void draw_solution(struct constraint *constraints, size_t fix, struct sol
 
 	// Build the solution steps
 	for(struct solve_step *step = steps; step < (steps + steps_num); step++) {
+		if(step->assembly != NULL) {
+			draw_for_subassembly(constraints, fix, step, drawing, assembly);
+			continue;
+		}
+
 		struct component *local_i;
 		struct component *oppo_i;
 		if(step->i_forward) {
@@ -513,43 +746,7 @@ static void draw_solution(struct constraint *constraints, size_t fix, struct sol
 				assert(constraints[step->i].v == 0);
 				oppo_i->e = local_i->e;
 			} else {
-				struct element *d1 = insert_cmd(drawing, (struct command){
-					.op = CMD_VALUE_INPUT,
-					.index = step->i,
-					.dir = constraints[step->i].forward,
-					.result.type = ETYPE_VALUE,
-				});
-
-				struct element *d2 = insert_cmd(drawing, (struct command){
-					.op = CMD_VALUE_INPUT,
-					.index = step->j,
-					.dir = constraints[step->j].forward,
-					.result.type = ETYPE_VALUE,
-				});
-
-				struct element *c1 = insert_cmd(drawing, (struct command){
-					.op = CMD_CIRCLE_CENTER_RADIUS,
-					.hidden = !shown,
-					.result.type = ETYPE_CIRCLE,
-					.arg1 = local_i->e,
-					.arg2 = d1,
-				});
-
-				struct element *c2 = insert_cmd(drawing, (struct command){
-					.op = CMD_CIRCLE_CENTER_RADIUS,
-					.hidden = !shown,
-					.result.type = ETYPE_CIRCLE,
-					.arg1 = local_j->e,
-					.arg2 = d2,
-				});
-
-				oppo_i->e = insert_cmd(drawing, (struct command){
-					.op = CMD_POINT_CIRCLE_CIRCLE,
-					.hidden = !shown,
-					.result.type = ETYPE_POINT,
-					.arg1 = c1,
-					.arg2 = c2,
-				});
+				draw_point_from_2_distance(drawing, constraints, step->i, step->j, local_i, local_j, &oppo_i->e, shown);
 			}
 		} else if(constraints[step->i].type == CT_POINT_LINE_DISTANCE
 			&& local_i->type == COM_POINT
@@ -747,6 +944,8 @@ static void draw_solution(struct constraint *constraints, size_t fix, struct sol
 		}
 
 	}
+
+	assembly->last_command = drawing->tail;
 }
 
 int unt64_t_compar(const void *a, const void *b) {
@@ -803,7 +1002,7 @@ bool solve_constraints(struct constraints *constraints, struct drawing *drawing,
 
 		// printf("Solved in %ld steps\n", steps_num);
 
-		draw_solution(constraints->elements, fix, assemblies[*assemblies_num].steps, assemblies[*assemblies_num].steps_num, drawing);
+		draw_solution(constraints->elements, fix, assemblies[*assemblies_num].steps, assemblies[*assemblies_num].steps_num, drawing, &assemblies[*assemblies_num]);
 		for(size_t i = 0; i < assemblies[*assemblies_num].articulation_num; i++) {
 			assemblies[*assemblies_num].articulation_position[i] = assemblies[*assemblies_num].articulation[i]->e;
 		}
@@ -829,210 +1028,5 @@ bool solve_constraints(struct constraints *constraints, struct drawing *drawing,
 	return complete;
 }
 
-static void affine_transform_vec2(mat3 m, vec2 in, vec2 out) {
-	vec3 h = {in[0], in[1], 1.0f};
-	vec3 result;
-	glm_mat3_mulv(m, h, result);
-	out[0] = result[0];
-	out[1] = result[1];
-}
-
 void reconstruct_drawing(struct constraints *constraints, struct subassembly *assemblies, size_t *assemblies_num) {
-	// We build everything from the first assembly
-	assemblies[0].fixed = true;
-	while(true) {
-		// Look for unfixed assembly we can connect to something that is fixed
-		for(size_t i = 0; i < *assemblies_num; i++) {
-			if(assemblies[i].fixed) continue;
-
-			// Find a fixed asssembly it connects to
-			for(size_t j = 0; j < *assemblies_num; j++) {
-				if(!assemblies[j].fixed) continue;
-
-				size_t articulation_i;
-				size_t articulation_j;
-
-				// Find a shared articulation
-				for(articulation_i = 0; articulation_i < assemblies[i].articulation_num; articulation_i++) {
-					for(articulation_j = 0; articulation_j < assemblies[j].articulation_num; articulation_j++) {
-						if(assemblies[i].articulation[articulation_i] == assemblies[j].articulation[articulation_j]) {
-							goto articulation_found;
-						}
-					}
-				}
-				continue;
-articulation_found:
-				;
-
-				struct constraint *constraint = NULL;
-				bool forward;
-
-				// An unused constraint would let us match disjoint articulations
-				for(size_t constraint_i = 0; constraint_i < constraints->length; constraint_i++) {
-					struct constraint *c = &constraints->elements[constraint_i];
-					if(c->used) continue;
-
-					for(size_t articuation_i = 0; articuation_i < assemblies[i].articulation_num; articuation_i++) {
-						if(c->c1 == assemblies[i].articulation[articuation_i]) {
-							forward = true;
-							goto constraint_matches_i;
-						} else if(c->c2 == assemblies[i].articulation[articuation_i]) {
-							forward = false;
-							goto constraint_matches_i;
-						}
-					}
-					continue;
-constraint_matches_i:
-					;
-
-					{
-						struct component *needle = forward ? c->c2 : c->c1;
-						for(size_t articuation_j = 0; articuation_j < assemblies[j].articulation_num; articuation_j++) {
-							if(needle == assemblies[j].articulation[articuation_j]) {
-								goto constraint_matches_j;
-							}
-						}
-					}
-					continue;
-constraint_matches_j:
-					;
-
-					constraint = c;
-					goto constraint_found;
-				}
-				continue;
-constraint_found:
-				;
-
-				// Here we have two assemblies, one fixed and the other not,
-				// that share a single point and each one other point that
-				// share a constraint. Try place the rigid body based on that
-				// information
-
-				float theta;
-				if(constraint->type == CT_LINE_LINE_ANGLE) {
-					assert(constraint->c1->e->type == ETYPE_LINE);
-					assert(constraint->c2->e->type == ETYPE_LINE);
-
-					// Align the two lines
-					theta = atan2(constraint->c1->e->line.norm[1], constraint->c1->e->line.norm[0]) - atan2(constraint->c2->e->line.norm[1], constraint->c2->e->line.norm[0]);
-					theta = forward ? -theta : theta;
-
-					// Then rotate by whatever the constraint says
-					theta += constraint->forward ? constraint->v : -constraint->v;
-				} else if(constraint->type == CT_POINT_LINE_DISTANCE) {
-					assert(constraint->c1->e->type == ETYPE_POINT);
-					assert(constraint->c2->e->type == ETYPE_LINE);
-
-					struct line line = constraint->c2->e->line;
-					float norm_len = glm_vec2_norm(line.norm);
-					float beta = atan2(line.norm[1], line.norm[0]);
-					float v_signed = constraint->forward ? constraint->v : -constraint->v;
-
-					if(forward) {
-						// Point (c1) is in assembly i (unfixed), line (c2) is in assembly j (fixed)
-						vec2 v_src;
-						glm_vec2_sub(constraint->c1->e->point.pos, assemblies[i].articulation_position[articulation_i]->point.pos, v_src);
-						float r = glm_vec2_norm(v_src);
-						float alpha = atan2(v_src[1], v_src[0]);
-
-						float d_pivot = (glm_vec2_dot(line.norm, assemblies[j].articulation_position[articulation_j]->point.pos) + line.C) / norm_len;
-						float cos_val = (v_signed - d_pivot) / r;
-						if(cos_val > 1.0f) cos_val = 1.0f;
-						if(cos_val < -1.0f) cos_val = -1.0f;
-
-						theta = beta - alpha + acos(cos_val);
-					} else {
-						// Line (c2) is in assembly i (unfixed), point (c1) is in assembly j (fixed)
-						vec2 v_ext;
-						glm_vec2_sub(constraint->c1->e->point.pos, assemblies[j].articulation_position[articulation_j]->point.pos, v_ext);
-						float r = glm_vec2_norm(v_ext);
-						float alpha_ext = atan2(v_ext[1], v_ext[0]);
-
-						float d_pivot_i = (glm_vec2_dot(line.norm, assemblies[i].articulation_position[articulation_i]->point.pos) + line.C) / norm_len;
-						float cos_val = (v_signed - d_pivot_i) / r;
-						if(cos_val > 1.0f) cos_val = 1.0f;
-						if(cos_val < -1.0f) cos_val = -1.0f;
-
-						theta = alpha_ext - beta + acos(cos_val);
-					}
-				} else {
-					abort();
-				}
-				constraint->used = i+1;
-
-				assert(assemblies[i].articulation_position[articulation_i]->type == ETYPE_POINT);
-				assert(assemblies[j].articulation_position[articulation_j]->type == ETYPE_POINT);
-
-				mat3 transform;
-				glm_mat3_identity(transform);
-
-				glm_translate2d(transform, assemblies[j].articulation_position[articulation_j]->point.pos);
-
-				glm_rotate2d(transform, theta);
-
-				{
-					vec2 negative_translate;
-					glm_vec2_negate_to(assemblies[i].articulation_position[articulation_i]->point.pos, negative_translate);
-					glm_translate2d(transform, negative_translate);
-				}
-
-				// We have to transform the fixed point separately, since it
-				// doesn't have a build step
-				{
-					struct component *c = constraints->elements[assemblies[i].fix].c1;
-					assert(c->type == COM_POINT);
-
-					affine_transform_vec2(transform, c->e->point.pos, c->e->point.pos);
-				}
-				{
-					struct component *c = constraints->elements[assemblies[i].fix].c2;
-					assert(c->type == COM_POINT);
-
-					affine_transform_vec2(transform, c->e->point.pos, c->e->point.pos);
-				}
-
-				// Transform all other points in the body by iterating the
-				// steps. Each step places a single component.
-				for(size_t k = 0; k < assemblies[i].steps_num; k++) {
-					struct solve_step *step = &assemblies[i].steps[k];
-
-					struct component *c = step->i_forward ?
-						constraints->elements[step->i].c2 :
-						constraints->elements[step->i].c1;
-
-					if(c->type == COM_POINT) {
-						affine_transform_vec2(transform, c->e->point.pos, c->e->point.pos);
-					} else if(c->type == COM_LINE) {
-						// Find a point on the line, what point doesn't matter
-						// since the whole line is moving
-						struct line line = c->e->line;
-
-						vec2 p;
-						glm_vec2_zero(p);
-
-						glm_vec2_muladds(line.norm, line.C, p);
-						double rec = glm_vec2_norm2(line.norm);
-						glm_vec2_divs(p, rec, p);
-
-						// Rotate the line to the new orientation
-						glm_vec2_rotate(line.norm, theta, line.norm);
-
-						// Transform the fixed point
-						affine_transform_vec2(transform, p, p);
-
-						// Calculate a C to follow the new point
-						glm_vec2_negate(p);
-						line.C = glm_vec2_dot(line.norm, p);
-
-						c->e->line = line;
-					} else {
-						abort();
-					}
-				}
-				assemblies[i].fixed = true;
-			}
-		}
-		break;
-	}
 }

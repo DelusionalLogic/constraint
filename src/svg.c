@@ -369,7 +369,7 @@ void begin_drawing(struct canvas *canvas) {
 	assert(canvas->f != NULL);
 	assert(canvas->state == CANVAS_INIT);
 
-	fprintf(canvas->f, "<svg version=\"1.1\" viewBox=\"-100 -190 200 200\" width=\"1200\" height=\"1200\" xmlns=\"http://www.w3.org/2000/svg\">\n");
+	fprintf(canvas->f, "<svg version=\"1.1\" viewBox=\"-50 -50 100 100\" width=\"1200\" height=\"1200\" xmlns=\"http://www.w3.org/2000/svg\">\n");
 	fprintf(canvas->f, "<defs>\n");
 	fprintf(canvas->f, "\t<marker id=\"triangle\" viewBox=\"0 0 10 10\" refX=\"10\" refY=\"5\" markerUnits=\"strokeWidth\" markerWidth=\"6\" markerHeight=\"6\" orient=\"auto-start-reverse\">\n");
 	fprintf(canvas->f, "\t\t<path d=\"M 0 0 L 10 5 L 0 10 z\" fill=\"blue\" opacity=\"0.3\" />\n");

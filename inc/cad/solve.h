@@ -9,6 +9,8 @@ enum component_type {
 	COM_LINE,
 };
 
+struct subassembly;
+
 struct component {
 	enum component_type type;
 
@@ -22,6 +24,8 @@ struct component {
 	bool drawn;
 
 	bool fixed;
+	struct subassembly* in;
+	struct subassembly* ein;
 };
 
 struct alias {
@@ -111,6 +115,9 @@ struct subassembly {
 	struct component **articulation;
 	struct element **articulation_position;
 	size_t articulation_num;
+
+	struct command *first_command;
+	struct command *last_command;
 
 	bool fixed;
 };

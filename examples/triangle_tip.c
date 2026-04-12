@@ -54,7 +54,7 @@ int main(int argc, char *argv[]) {
 		POINT_ON_LINE(&p2, &t1base),
 
 		POINT_ON_LINE(&p1, &t1bas2),
-		LL_ANGLE(&t1base, &t1bas2, DEG(-5)),
+		LL_ANGLE(&t1base, &t1bas2, DEG(-10)),
 
 		// With another triangle sharing a point
 		PP_DISTANCE(&p4, &p5, 30),

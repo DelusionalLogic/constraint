@@ -18,6 +18,9 @@ enum operation {
 	// cases
 	CMD_LINE_CIRCLE_CIRCLE_TANGENT,
 	CMD_LINE_LINE_DISTANCE_PARALLEL,
+
+	// Handle assemblies
+	CMD_IMPORT_POINT_LINE,
 };
 
 struct point {
@@ -60,6 +63,11 @@ struct command {
 	// Only used for input commands
 	size_t index;
 	bool dir;
+
+	// Only used for import
+	struct subassembly *d;
+	struct element *attachp;
+	struct element *attachl;
 
 	struct element *arg1;
 	struct element *arg2;

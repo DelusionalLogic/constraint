@@ -68,7 +68,79 @@ struct element* insert_cmd(struct drawing *drawing, struct command cmd) {
 
 #define SETSIGN(b, v) ((v) * ((2 * (b)) - 1))
 
+static void affine_transform_vec2(mat3 m, vec2 in, vec2 out) {
+	vec3 h = {in[0], in[1], 1.0f};
+	vec3 result;
+	glm_mat3_mulv(m, h, result);
+	out[0] = result[0];
+	out[1] = result[1];
+}
+
+static void transform_part(struct command *cmd, const struct command *last_cmd, mat3 transform) {
+	mat3 rotate;
+	glm_mat3_copy(transform, rotate);
+	rotate[2][0] = 0.0;
+	rotate[2][1] = 0.0;
+	rotate[2][2] = 0.0;
+
+	while(cmd != NULL) {
+		switch(cmd->op) {
+			case CMD_VALUE_INPUT:
+			case CMD_OFFSET_INPUT:
+			break;
+			case CMD_LINE_X:
+			case CMD_LINE_POINT_POINT:
+			case CMD_LINE_POINT_LINE_ANGLE:
+			case CMD_LINE_CIRCLE_CIRCLE_TANGENT:
+			case CMD_LINE_LINE_DISTANCE_PARALLEL:
+				// Find a point on the line, what point doesn't matter
+				// since the whole line is moving
+				struct line line = cmd->result.line;
+
+				vec2 p;
+				glm_vec2_zero(p);
+
+				glm_vec2_muladds(line.norm, line.C, p);
+				double rec = glm_vec2_norm2(line.norm);
+				glm_vec2_divs(p, rec, p);
+
+				// Rotate the line to the new orientation
+				affine_transform_vec2(rotate, line.norm, line.norm);
+
+				// Transform the fixed point
+				affine_transform_vec2(transform, p, p);
+
+				// Calculate a C to follow the new point
+				glm_vec2_negate(p);
+				line.C = glm_vec2_dot(line.norm, p);
+
+				cmd->result.line = line;
+			break;
+			case CMD_CIRCLE_CENTER_RADIUS:
+			case CMD_CIRCLE_CENTER_POINT:
+				affine_transform_vec2(transform, cmd->result.circle.center, cmd->result.circle.center);
+			break;
+			case CMD_ORIGIN:
+			case CMD_POINT_CIRCLE_LINE:
+			case CMD_POINT_CIRCLE_CIRCLE:
+			case CMD_POINT_LINE_LINE:
+				affine_transform_vec2(transform, cmd->result.point.pos, cmd->result.point.pos);
+			break;
+
+			case CMD_IMPORT_POINT_LINE:
+				transform_part(cmd->d->first_command, cmd->d->last_command, transform);
+				break;
+		}
+
+		// @HACK The last command is also included in this assembly
+		if(cmd == last_cmd) break;
+		cmd = cmd->next;
+	}
+}
+
 void place_points(struct drawing *drawing, double inputs[]) {
+	struct command *outer_object = drawing->root;
+
 	for(struct command *current = drawing->root; current != NULL; current = current->next) {
 		switch(current->op) {
 			case CMD_VALUE_INPUT: {
@@ -84,6 +156,7 @@ void place_points(struct drawing *drawing, double inputs[]) {
 			case CMD_ORIGIN: {
 				assert(current->result.type == ETYPE_POINT);
 				glm_vec2_zero(current->result.point.pos);
+				outer_object = current;
 			}break;
 			case CMD_LINE_X: {
 				assert(current->result.type == ETYPE_LINE);
@@ -191,9 +264,65 @@ void place_points(struct drawing *drawing, double inputs[]) {
 				glm_vec2_sub(current->arg1->point.pos, current->arg2->point.pos, imm);
 				current->result.circle.radius = glm_vec2_norm(imm);
 			}break;
+			case CMD_IMPORT_POINT_LINE: {
+				assert(current->arg1->type == ETYPE_POINT);
+				assert(current->arg2->type == ETYPE_LINE);
 
+				assert(current->d != NULL);
+				assert(current->attachp != NULL);
+				assert(current->attachl != NULL);
+
+				double theta;
+				// Align the two lines
+				theta = atan2(current->arg2->line.norm[1], current->arg2->line.norm[0]) - atan2(current->attachl->line.norm[1], current->attachl->line.norm[0]);
+
+				mat3 transform;
+				glm_mat3_identity(transform);
+
+				glm_translate2d(transform, current->attachp->point.pos);
+
+				glm_rotate2d(transform, theta);
+
+				{
+					vec2 negative_translate;
+					glm_vec2_negate_to(current->arg1->point.pos, negative_translate);
+					glm_translate2d(transform, negative_translate);
+				}
+
+				fprintf(stderr, "Assembly %p %p %p %f\n", current->d, current->d->first_command, current->d->last_command, theta);
+				transform_part(current->d->first_command, current->d->last_command, transform);
+			}break;
 		}
 		// printf("%fx + %fy + %f = 0\n", cmd[2].line.norm[0], cmd[2].line.norm[1], cmd[2].line.C);
+	}
+
+
+	// Realign the very first component as the base again for simplicty
+	{
+		struct command *origin = drawing->root;
+		struct command *xaxis = origin->next;
+
+		assert(origin->op == CMD_ORIGIN);
+		assert(origin->result.type == ETYPE_POINT);
+		assert(xaxis->op == CMD_LINE_X);
+		assert(xaxis->result.type == ETYPE_LINE);
+
+		double theta;
+		theta =  atan2(1, 0) - atan2(xaxis->result.line.norm[1], xaxis->result.line.norm[0]);
+
+		mat3 transform;
+		glm_mat3_identity(transform);
+
+		glm_rotate2d(transform, theta);
+
+		{
+			vec2 negative_translate;
+			glm_vec2_negate_to(origin->result.point.pos, negative_translate);
+			glm_translate2d(transform, negative_translate);
+		}
+
+		fprintf(stderr, "W %f %f\n", origin->result.point.pos[0], origin->result.point.pos[1]);
+		// transform_part(outer_object, NULL, transform);
 	}
 }
 
