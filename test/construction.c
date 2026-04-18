@@ -485,6 +485,12 @@ int main(int argc, char *argv[]) {
 	{
 		struct drawing drawing = {};
 
+		insert_cmd(&drawing, (struct command){
+			.op = CMD_ORIGIN,
+			.hidden = true,
+			.result.type = ETYPE_POINT,
+		});
+
 		struct element *xaxis = insert_cmd(&drawing, (struct command){
 			.op = CMD_LINE_X,
 			.hidden = true,

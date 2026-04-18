@@ -95,26 +95,25 @@ static void transform_part(struct command *cmd, const struct command *last_cmd, 
 			case CMD_LINE_LINE_DISTANCE_PARALLEL:
 				// Find a point on the line, what point doesn't matter
 				// since the whole line is moving
-				struct line line = cmd->result.line;
+				struct line *line = &cmd->result.line;
 
 				vec2 p;
 				glm_vec2_zero(p);
 
-				glm_vec2_muladds(line.norm, line.C, p);
-				double rec = glm_vec2_norm2(line.norm);
-				glm_vec2_divs(p, rec, p);
+				if(line->norm[0] > line->norm[1])
+					glm_vec2_copy((vec2){-line->C / line->norm[0], 0}, p);
+				else
+					glm_vec2_copy((vec2){0, -line->C / line->norm[1]}, p);
 
 				// Rotate the line to the new orientation
-				affine_transform_vec2(rotate, line.norm, line.norm);
+				affine_transform_vec2(rotate, line->norm, line->norm);
 
 				// Transform the fixed point
 				affine_transform_vec2(transform, p, p);
 
 				// Calculate a C to follow the new point
 				glm_vec2_negate(p);
-				line.C = glm_vec2_dot(line.norm, p);
-
-				cmd->result.line = line;
+				line->C = glm_vec2_dot(line->norm, p);
 			break;
 			case CMD_CIRCLE_CENTER_RADIUS:
 			case CMD_CIRCLE_CENTER_POINT:
@@ -181,7 +180,9 @@ void place_points(struct drawing *drawing, double inputs[]) {
 
 				// printf("Rotate %f\n", current->arg3->value);
 				// printf("%f %f\n", current->arg2->line.norm[0], current->arg2->line.norm[1]);
-				glm_vec2_rotate(current->arg2->line.norm, current->arg3->value, current->result.line.norm);
+				double value = current->arg3->value;
+				value = current->root == 0 ? value : -value;
+				glm_vec2_rotate(current->arg2->line.norm, value, current->result.line.norm);
 				// printf("%f %f\n", current->result.line.norm[0], current->result.line.norm[1]);
 
 				vec2 offset = {-current->arg1->point.pos[0], -current->arg1->point.pos[1]};
@@ -275,6 +276,7 @@ void place_points(struct drawing *drawing, double inputs[]) {
 				double theta;
 				// Align the two lines
 				theta = atan2(current->arg2->line.norm[1], current->arg2->line.norm[0]) - atan2(current->attachl->line.norm[1], current->attachl->line.norm[0]);
+				fprintf(stderr, "%f\n", theta / M_PI * 180.0);
 
 				mat3 transform;
 				glm_mat3_identity(transform);
@@ -322,7 +324,7 @@ void place_points(struct drawing *drawing, double inputs[]) {
 		}
 
 		fprintf(stderr, "W %f %f\n", origin->result.point.pos[0], origin->result.point.pos[1]);
-		// transform_part(outer_object, NULL, transform);
+		transform_part(outer_object, NULL, transform);
 	}
 }
 

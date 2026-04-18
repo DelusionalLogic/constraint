@@ -21,6 +21,8 @@ struct canvas {
 	FILE *f;
 };
 
+void line_distance_to_point(struct line l, double d, struct point *p);
+
 void plot_line_between(struct canvas *canvas, struct point p1, struct point p2);
 void plot_arc_between_style(struct canvas *canvas, struct point c, struct point p1, struct point p2, enum LineStyle style);
 void plot_arc_between(struct canvas *canvas, struct point c, struct point p1, struct point p2);

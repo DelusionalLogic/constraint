@@ -1,4 +1,5 @@
 #include "cad.h"
+#include "cad/svg.h"
 #include "cad/debug.h"
 
 void draw_from_constraints(struct constraints *c, struct topology *t, struct canvas *cv) {

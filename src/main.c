@@ -1,4 +1,5 @@
 #include "cad.h"
+#include "cad/debug.h"
 
 struct smooth_line {
 	struct component l1;
@@ -130,6 +131,7 @@ void draw_from_constraints(struct constraints *c, struct topology *t, struct can
 	place_points(&drawing, params);
 	free(params);
 
+	print_subassemblies(c, assemblies, assembly_num);
 	begin_drawing(cv);
 	// for(struct command *current = drawing.root; current != NULL && current != drawing.error; current = current->next) {
 	// 	if(current->hidden) continue;

@@ -30,11 +30,11 @@ void print_subassemblies(struct constraints *c, struct subassembly *assemblies, 
 				component_type_name[ct->c2->type], (void*)ct->c2);
 		}
 	}
-	fprintf(stderr, "  Unused constraints:\n");
+	fprintf(stderr, "Unused constraints:\n");
 	for(size_t j = 0; j < c->length; j++) {
 		struct constraint *ct = &c->elements[j];
 		if(ct->used != 0) continue;
-		fprintf(stderr, "    [%zu] %s v=%.2f (%s %p, %s %p)\n",
+		fprintf(stderr, "  [%zu] %s v=%.2f (%s %p, %s %p)\n",
 			j, constraint_type_name[ct->type], ct->v,
 			component_type_name[ct->c1->type], (void*)ct->c1,
 			component_type_name[ct->c2->type], (void*)ct->c2);

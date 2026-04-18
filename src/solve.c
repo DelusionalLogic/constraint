@@ -639,6 +639,7 @@ static void draw_for_subassembly(struct constraint *constraints, size_t fix, str
 		.op = CMD_LINE_POINT_LINE_ANGLE,
 		.hidden = !oppo_j->show_when_placed,
 		.result.type = ETYPE_LINE,
+		.root = 1,
 		.arg1 = p,
 		.arg2 = local_j->e,
 		.arg3 = theta,
@@ -651,7 +652,7 @@ static void draw_for_subassembly(struct constraint *constraints, size_t fix, str
 		.arg2 = l,
 		.d = step->assembly,
 		.attachp = oppo_i->e,
-		.attachl = oppo_k->e,
+		.attachl = oppo_j->e,
 	});
 }
 
