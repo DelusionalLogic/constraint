@@ -30,6 +30,7 @@ void print_subassemblies(struct constraints *c, struct subassembly *assemblies, 
 				component_type_name[ct->c2->type], (void*)ct->c2);
 		}
 	}
+
 	fprintf(stderr, "Unused constraints:\n");
 	for(size_t j = 0; j < c->length; j++) {
 		struct constraint *ct = &c->elements[j];
@@ -38,6 +39,20 @@ void print_subassemblies(struct constraints *c, struct subassembly *assemblies, 
 			j, constraint_type_name[ct->type], ct->v,
 			component_type_name[ct->c1->type], (void*)ct->c1,
 			component_type_name[ct->c2->type], (void*)ct->c2);
+
+		for(size_t i = 0; i < assemblies_num; i++) {
+			struct subassembly *a = &assemblies[i];
+			for(size_t k = 0; k < a->articulation_num; k++) {
+				if(a->articulation[k] == ct->c1)
+					goto articulation_found;
+				if(a->articulation[k] == ct->c2)
+					goto articulation_found;
+			}
+			// Constraint did not touch one of the articulations
+			continue;
+articulation_found:
+			fprintf(stderr, "    Connects to %zu\n", i);
+		}
 	}
 	fprintf(stderr, "=========================\n");
 }

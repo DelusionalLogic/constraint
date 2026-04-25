@@ -237,7 +237,7 @@ int main(int argc, char *argv[]) {
 	a_box(&box, &topo, &constraints);
 
 	add_constraint(&constraints, (struct constraint[]){
-		PL_DISTANCE(&box.side[1], &box.corner[0], 20),
+		PP_DISTANCE(&box.corner[2], &box.corner[3], 20),
 
 		PP_DISTANCE(&line.corner_end, &box.corner[0], 9.5),
 		PL_DISTANCE(&box.corner[0], &components[3], 20),

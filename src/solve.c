@@ -207,8 +207,10 @@ struct solve_step {
 static bool fix_first(struct constraint *constraints, size_t constraints_num, size_t *c) {
 	for(size_t i = 0; i < constraints_num; i++) {
 		if(constraints[i].used) continue;
-		if(constraints[i].type != CT_POINT_POINT_DISTANCE) continue;
-		if(constraints[i].v == 0.0) continue;
+
+		if(constraints[i].type != CT_POINT_POINT_DISTANCE && constraints[i].type != CT_POINT_LINE_DISTANCE) continue;
+		if(constraints[i].type == CT_POINT_POINT_DISTANCE && constraints[i].v == 0.0) continue;
+
 		if(constraints[i].c1->ein != NULL) continue;
 		if(constraints[i].c2->ein != NULL) continue;
 
@@ -354,7 +356,7 @@ static bool try_fix_component(struct constraints *constraints_in, struct compone
 
 			if(c->ein == NULL) {
 				if(dest != c) {
-					if(!find_angle(constraints, constraints_num, dest, c, constraints[i].path))
+					if(true)//!find_angle(constraints, constraints_num, dest, c, constraints[i].path))
 						continue;
 				}
 			} else {
@@ -363,10 +365,11 @@ static bool try_fix_component(struct constraints *constraints_in, struct compone
 			}
 
 			// Is this actually correct?
-			assert(!dest->fixed);
+			if(dest->fixed) continue;
 
 			*possibly_angle = &constraints[i];
 			*f2 = f;
+			if(c == dest) break;
 		}
 	}
 
@@ -425,8 +428,8 @@ static size_t build_triangles(struct constraints *constraints_in, struct compone
 			if(constraints[i].v != 0.0) continue;
 
 			// We'll handle this elsewhere?
-			if(constraints[i].c1->ein != NULL) continue;
-			if(constraints[i].c2->ein != NULL) continue;
+			if(!constraints[i].c1->fixed && constraints[i].c1->ein != NULL) continue;
+			if(!constraints[i].c2->fixed && constraints[i].c2->ein != NULL) continue;
 
 			struct component *oppo;
 			bool forward;
@@ -446,7 +449,7 @@ static size_t build_triangles(struct constraints *constraints_in, struct compone
 			constraints[i].order = 0;
 			constraints[i].used = useid;
 
-			steps[steps_i].assembly = assembly;
+			steps[steps_i].assembly = NULL;
 			steps[steps_i].i = i;
 			steps[steps_i].j = i;
 			steps[steps_i].i_forward = forward;
@@ -658,6 +661,8 @@ static void draw_for_subassembly(struct constraint *constraints, size_t fix, str
 
 static void draw_solution(struct constraint *constraints, size_t fix, struct solve_step* steps, size_t steps_num, struct drawing *drawing, struct subassembly *assembly) {
 	{
+		assert(constraints[fix].type == CT_POINT_POINT_DISTANCE ||
+			constraints[fix].type == CT_POINT_LINE_DISTANCE);
 		constraints[fix].c1->e = insert_cmd(drawing, (struct command){
 			.op = CMD_ORIGIN,
 			.hidden = true,
@@ -693,6 +698,22 @@ static void draw_solution(struct constraint *constraints, size_t fix, struct sol
 			.arg1 = c,
 			.arg2 = xaxis,
 		});
+
+		if(constraints[fix].type == CT_POINT_LINE_DISTANCE) {
+			static struct element right_angle = {
+				.type = ETYPE_VALUE,
+				.value = DEG(90),
+			};
+
+			constraints[fix].c2->e = insert_cmd(drawing, (struct command){
+				.op = CMD_LINE_POINT_LINE_ANGLE,
+				.hidden = true,
+				.result.type = ETYPE_LINE,
+				.arg1 = constraints[fix].c2->e,
+				.arg2 = xaxis,
+				.arg3 = &right_angle,
+			});
+		}
 	}
 
 	// Build the solution steps
