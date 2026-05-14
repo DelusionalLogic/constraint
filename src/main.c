@@ -237,7 +237,8 @@ int main(int argc, char *argv[]) {
 	a_box(&box, &topo, &constraints);
 
 	add_constraint(&constraints, (struct constraint[]){
-		PP_DISTANCE(&box.corner[2], &box.corner[3], 20),
+		PP_DISTANCE(&box.corner[0], &box.corner[1], 8),
+		PP_DISTANCE(&box.corner[1], &box.corner[2], 4),
 
 		PP_DISTANCE(&line.corner_end, &box.corner[0], 9.5),
 		PL_DISTANCE(&box.corner[0], &components[3], 20),
@@ -249,26 +250,26 @@ int main(int argc, char *argv[]) {
 		CEND(),
 	});
 
-	struct mid box_enter = a_midpoint();
+	// struct mid box_enter = a_midpoint();
 
-	add_constraint(&constraints, (struct constraint[]){
-		LL_ANGLE(&box.side[3], &box_enter.l1, DEG(-30)),
-		POINT_ON_LINE(&box.corner[0], &box_enter.l1),
-		LL_ANGLE(&box.side[3], &box_enter.l2, DEG(30)),
-		POINT_ON_LINE(&box.corner[3], &box_enter.l2),
+	// add_constraint(&constraints, (struct constraint[]){
+	// 	LL_ANGLE(&box.side[3], &box_enter.l1, DEG(-30)),
+	// 	POINT_ON_LINE(&box.corner[0], &box_enter.l1),
+	// 	LL_ANGLE(&box.side[3], &box_enter.l2, DEG(30)),
+	// 	POINT_ON_LINE(&box.corner[3], &box_enter.l2),
 
-		POINT_ON_LINE(&box_enter.l1, &box_enter.x1),
-		POINT_ON_LINE(&box_enter.l2, &box_enter.x1),
+	// 	POINT_ON_LINE(&box_enter.l1, &box_enter.x1),
+	// 	POINT_ON_LINE(&box_enter.l2, &box_enter.x1),
 
-		LL_ANGLE(&box.side[3], &box_enter.p1, DEG(90)),
+	// 	LL_ANGLE(&box.side[3], &box_enter.p1, DEG(90)),
 
-		POINT_ON_LINE(&box_enter.x1, &box_enter.p1),
-		POINT_ON_LINE(&box_enter.p, &box.side[3]),
-		POINT_ON_LINE(&box_enter.p1, &box_enter.p),
+	// 	POINT_ON_LINE(&box_enter.x1, &box_enter.p1),
+	// 	POINT_ON_LINE(&box_enter.p, &box.side[3]),
+	// 	POINT_ON_LINE(&box_enter.p1, &box_enter.p),
 
-		PP_DISTANCE(&box_enter.p, &box.corner[0], 5),
-		CEND(),
-	});
+	// 	PP_DISTANCE(&box_enter.p, &box.corner[0], 5),
+	// 	CEND(),
+	// });
 
 	struct canvas canvas = {
 		.state = CANVAS_INIT,

@@ -111,97 +111,22 @@ static void build_angle_point_line(struct drawing *drawing, struct constraint *c
 	});
 }
 
-// CLEANUP: None of this makes any sense. We shouldn't have to resolve the
-// angles separately. We should just be building up the subgraphs correctly,
-// and then the solutions for angles will pop out by themselves. So remove this
-// once we get subgraph solving working
-struct angle_search_frame {
-	size_t constraint_i;
-	struct component *head;
-	bool dir;
-};
-static bool find_angle(struct constraint *constraints, size_t constraints_num, struct component *first_component, struct component *needle, struct path_step *path) {
-	struct angle_search_frame frames[SEARCH_DEPTH];
-	struct angle_search_frame *frame = frames;
-
-	frame->constraint_i = 0;
-	frame->head = first_component;
-
-	bool *checked = calloc(sizeof(bool), constraints_num);
-
-	while(frame >= frames) {
-		assert(frame < frames + SEARCH_DEPTH);
-		assert(frame >= frames);
-
-		assert(frame->constraint_i <= constraints_num);
-		if(frame->constraint_i == constraints_num) {
-#if 0
-			printf("Dead end at: ");
-			for(struct angle_search_frame *i = frames; i <= frame; i++) {
-				printf("%ld -> ", i->constraint_i);
-			}
-			printf("\n");
-#endif
-			frame--;
-			frame->constraint_i++;
-			continue;
-		}
-
-		if(checked[frame->constraint_i]) {
-			frame->constraint_i++;
-			continue;
-		}
-
-		struct constraint *constraint = &constraints[frame->constraint_i];
-		if(constraint->type != CT_LINE_LINE_ANGLE) {
-			frame->constraint_i++;
-			continue;
-		}
-
-		struct component *other;
-
-		if(constraint->c1 == frame->head) {
-			other = constraint->c2;
-			frame->dir = true;
-		} else if(constraint->c2 == frame->head) {
-			other = constraint->c1;
-			frame->dir = false;
-		} else {
-			frame->constraint_i++;
-			continue;
-		}
-
-		if(other == needle) {
-			for(struct angle_search_frame *i = frames; i <= frame; i++) {
-				path[i - frames].i = i->constraint_i;
-				path[i - frames].direction = i->dir;
-			}
-			if(frame < frames + SEARCH_DEPTH-1) {
-				path[frame - frames + 1].i = -1;
-			}
-			free(checked);
-			return true;
-		}
-
-		checked[frame->constraint_i] = true;
-
-		frame++;
-		frame->constraint_i = 0;
-		frame->head = other;
-	}
-
-	free(checked);
-	return false;
-}
-
 struct solve_step {
 	size_t i;
 	size_t j;
 	size_t k;
+	size_t x;
+	size_t y;
+	size_t z;
 	bool i_forward;
 	bool j_forward;
 	bool k_forward;
+	bool x_forward;
+	bool y_forward;
+	bool z_forward;
+
 	struct subassembly *assembly;
+	struct subassembly *assembly2;
 };
 
 static bool fix_first(struct constraint *constraints, size_t constraints_num, size_t *c) {
@@ -228,8 +153,9 @@ static bool try_fix_component(struct constraints *constraints_in, struct compone
 	size_t constraints_num = constraints_in->length;
 
 	// Find something that is not an angle
-	// Even though this also handles assemblies, we only check again this exact
-	// component. The caller will call us for every component in the assembly.
+	// Even though this also handles assemblies, we only check against this
+	// exact component. The caller will call us for every component in the
+	// assembly.
 	for(size_t i = 0; i < constraints_num; i++) {
 		if(constraints[i].used) continue;
 		if(constraints[i].type == CT_LINE_LINE_ANGLE) continue;
@@ -356,8 +282,7 @@ static bool try_fix_component(struct constraints *constraints_in, struct compone
 
 			if(c->ein == NULL) {
 				if(dest != c) {
-					if(true)//!find_angle(constraints, constraints_num, dest, c, constraints[i].path))
-						continue;
+					continue;
 				}
 			} else {
 				// We don't do the whole walking thing if we're solving for assemblies
@@ -506,6 +431,173 @@ static size_t build_triangles(struct constraints *constraints_in, struct compone
 
 				steps_i++;
 				goto candidate_found;
+			}
+		}
+
+		// Look for two subassemblies that are each almost fixed (by two
+		// constraints) and are mutually constrained by two constraints
+		{
+			// Find the first subcomponent we can fix
+			for(size_t i = 0; i < component_num; i++) {
+				// If a component was already fixed, we don't need to do anything
+				if(components[i]->fixed) continue;
+
+				// We are only looking for subcomponents
+				if(components[i]->ein == NULL) continue;
+
+				struct constraint *not_angle_a = NULL;
+				bool f1_a;
+				struct constraint *possibly_angle_a = NULL;
+				bool f2_a;
+
+				struct constraint *second_not_angle_a = NULL;
+				bool f3_a;
+
+				struct subassembly *ein_a = components[i]->ein;
+				// @HACK Reset the points assembly information force it to not
+				// use the subassembly path
+				components[i]->ein = NULL;
+				if(try_fix_component(constraints_in, components[i], &not_angle_a, &f1_a, &possibly_angle_a, &f2_a, &second_not_angle_a, &f3_a)) {
+					// This should never be set since we reset the subassembly
+					components[i]->ein = ein_a;
+					assert(second_not_angle_a == NULL);
+
+					// Now find a second assembly
+					for(size_t j = 0; j < component_num; j++) {
+						// If a component was already fixed, we don't need to do anything
+						if(components[j]->fixed) continue;
+
+						// We are only looking for subcomponents
+						if(components[j]->ein == NULL) continue;
+						if(components[j]->ein == ein_a) continue;
+
+						struct constraint *not_angle_b = NULL;
+						bool f1_b;
+						struct constraint *possibly_angle_b = NULL;
+						bool f2_b;
+
+						struct constraint *second_not_angle_b = NULL;
+						bool f3_b;
+						struct subassembly *ein_b = components[j]->ein;
+						// @HACK Reset the points assembly information force it to not
+						// use the subassembly path
+						components[j]->ein = NULL;
+						if(try_fix_component(constraints_in, components[j], &not_angle_b, &f1_b, &possibly_angle_b, &f2_b, &second_not_angle_b, &f3_b)) {
+							components[j]->ein = ein_b;
+							// This should never be set since we reset the subassembly
+							assert(second_not_angle_b == NULL);
+
+
+							// We now have two subassmblies that are fixable by
+							// two constraints to the current one. Now we need
+							// to find two constraints that go between them
+
+							struct constraint *not_angle_c = NULL;
+							bool f1_c;
+							struct constraint *possibly_angle_c = NULL;
+							bool f2_c;
+
+							for(size_t k = 0; k < constraints_num; k++) {
+								if(constraints[k].used) continue;
+
+								bool f;
+								struct component *oppo;
+								if(constraints[k].c1->ein == ein_a && constraints[k].c2->ein == ein_b) {
+									oppo = constraints[k].c2;
+									f = false;
+								} else if(constraints[k].c1->ein == ein_b && constraints[k].c2->ein == ein_a) {
+									oppo = constraints[k].c1;
+									f = true;
+								} else {
+									continue;
+								}
+
+								assert(!oppo->fixed);
+
+								not_angle_c = &constraints[k];
+								f1_c = f;
+
+								break;
+							}
+
+							if(not_angle_c == NULL) continue;
+
+							for(size_t k = 0; k < constraints_num; k++) {
+								if(constraints[k].used) continue;
+
+								if(&constraints[k] == not_angle_c) continue;
+
+								bool f;
+								struct component *oppo;
+								if(constraints[k].c1->ein == ein_a && constraints[k].c2->ein == ein_b) {
+									oppo = constraints[k].c2;
+									f = false;
+								} else if(constraints[k].c1->ein == ein_b && constraints[k].c2->ein == ein_a) {
+									oppo = constraints[k].c1;
+									f = true;
+								} else {
+									continue;
+								}
+
+								assert(!oppo->fixed);
+
+								possibly_angle_c = &constraints[k];
+								f2_c = f;
+
+								break;
+							}
+
+							if(possibly_angle_c == NULL) continue;
+
+							printf("Assembly %p and %p, %d %d %s %s\n", ein_a, ein_b, f1_c, f2_c, constraint_type_name[not_angle_c->type], constraint_type_name[possibly_angle_c->type]);
+
+							// We've fixed the subcomponents, so we have to fix
+							// the whole thing
+							for(size_t j = 0; j < component_num; j++) {
+								if(components[j]->ein != ein_a && components[j]->ein != ein_b) continue;
+
+								add_frontier(components[j]);
+								components[j]->ein = assembly;
+							}
+
+							// There's a total of 6 different constraints involved here
+							not_angle_a->used = useid;
+							not_angle_a->order = order++;
+							not_angle_b->used = useid;
+							not_angle_b->order = order++;
+							not_angle_c->used = useid;
+							not_angle_c->order = order++;
+
+							possibly_angle_a->used = useid;
+							possibly_angle_a->order = order++;
+							possibly_angle_b->used = useid;
+							possibly_angle_b->order = order++;
+							possibly_angle_c->used = useid;
+							possibly_angle_c->order = order++;
+
+							steps[steps_i].assembly = ein_a;
+							steps[steps_i].assembly2 = ein_b;
+							steps[steps_i].i = not_angle_a - constraints;
+							steps[steps_i].i_forward = f1_a;
+							steps[steps_i].j = possibly_angle_a - constraints;
+							steps[steps_i].j_forward = f2_a;
+							steps[steps_i].k = not_angle_b - constraints;
+							steps[steps_i].k_forward = f1_a;
+							steps[steps_i].x = possibly_angle_b - constraints;
+							steps[steps_i].x_forward = f2_b;
+							steps[steps_i].y = not_angle_c - constraints;
+							steps[steps_i].y_forward = f1_c;
+							steps[steps_i].z = possibly_angle_c - constraints;
+							steps[steps_i].z_forward = f2_c;
+
+							steps_i++;
+
+							goto candidate_found;
+						}
+						components[j]->ein = ein_b;
+					}
+				}
+				components[i]->ein = ein_a;
 			}
 		}
 
@@ -659,6 +751,17 @@ static void draw_for_subassembly(struct constraint *constraints, size_t fix, str
 	});
 }
 
+static void draw_for_double_subassembly(struct constraint *constraints, size_t fix, struct solve_step *step, struct drawing *drawing, struct subassembly *assembly) {
+	assert(step->assembly != NULL);
+	assert(step->assembly2 != NULL);
+
+	// Here we have two assemblies that relate to the current fixed set through
+	// two constraints each, but are also mutually constrained by two
+	// constraints.
+
+	abort();
+}
+
 static void draw_solution(struct constraint *constraints, size_t fix, struct solve_step* steps, size_t steps_num, struct drawing *drawing, struct subassembly *assembly) {
 	{
 		assert(constraints[fix].type == CT_POINT_POINT_DISTANCE ||
@@ -719,9 +822,14 @@ static void draw_solution(struct constraint *constraints, size_t fix, struct sol
 	// Build the solution steps
 	for(struct solve_step *step = steps; step < (steps + steps_num); step++) {
 		if(step->assembly != NULL) {
+			if(step->assembly2 != NULL) {
+				draw_for_double_subassembly(constraints, fix, step, drawing, assembly);
+				continue;
+			}
 			draw_for_subassembly(constraints, fix, step, drawing, assembly);
 			continue;
 		}
+		assert(step->assembly2 == NULL);
 
 		struct component *local_i;
 		struct component *oppo_i;
