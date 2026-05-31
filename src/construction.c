@@ -87,6 +87,8 @@ static void transform_part(struct command *cmd, const struct command *last_cmd, 
 		switch(cmd->op) {
 			case CMD_VALUE_INPUT:
 			case CMD_OFFSET_INPUT:
+			case CMD_MEASURE_POINT_LINE_DISTANCE:
+			case CMD_MEASURE_LINE_LINE_ANGLE:
 			break;
 			case CMD_LINE_X:
 			case CMD_LINE_POINT_POINT:
@@ -127,6 +129,7 @@ static void transform_part(struct command *cmd, const struct command *last_cmd, 
 			break;
 
 			case CMD_IMPORT_POINT_LINE:
+			case CMD_IMPORT_LINE_LINE:
 				transform_part(cmd->d->first_command, cmd->d->last_command, transform);
 				break;
 		}
@@ -134,6 +137,64 @@ static void transform_part(struct command *cmd, const struct command *last_cmd, 
 		// @HACK The last command is also included in this assembly
 		if(cmd == last_cmd) break;
 		cmd = cmd->next;
+	}
+}
+
+void dump_program(struct drawing *drawing, double inputs[]) {
+	for(struct command *current = drawing->root; current != NULL; current = current->next) {
+		switch(current->op) {
+			case CMD_VALUE_INPUT: {
+				fprintf(stderr, "%p -> LIT(%d, %f) = %f\n", &current->result, current->dir, inputs[current->index], current->result.value);
+			}break;
+			case CMD_OFFSET_INPUT: {
+				fprintf(stderr, "%p -> OFF(%f, %d, %f) = %f\n", &current->result, current->arg1->value, current->dir, inputs[current->index], current->result.value);
+			}break;
+			case CMD_ORIGIN: {
+				fprintf(stderr, "%p -> ZER() = <%f, %f>\n", &current->result, current->result.point.pos[0], current->result.point.pos[1]);
+			}break;
+			case CMD_LINE_X: {
+				fprintf(stderr, "%p -> LNX() = (%fx + %fy + %f = 0)\n", &current->result, current->result.line.norm[0], current->result.line.norm[1], current->result.line.C);
+			}break;
+			case CMD_CIRCLE_CENTER_RADIUS: {
+				fprintf(stderr, "%p -> CCR(%p, %p) = ((x-%f)^2 + (y-%f)^2 = %f^2)\n", &current->result, current->arg1, current->arg2, current->result.circle.center[0], current->result.circle.center[1], current->result.circle.radius);
+			}break;
+			case CMD_LINE_POINT_POINT: {
+				fprintf(stderr, "%p -> LPP(%p, %p) = (%fx + %fy + %f = 0)\n", &current->result, current->arg1, current->arg2, current->result.line.norm[0], current->result.line.norm[1], current->result.line.C);
+			}break;
+			case CMD_LINE_POINT_LINE_ANGLE: {
+				fprintf(stderr, "%p -> PLA(%p, %p, %p) = (%fx + %fy + %f = 0)\n", &current->result, current->arg1, current->arg2, current->arg3, current->result.line.norm[0], current->result.line.norm[1], current->result.line.C);
+			}break;
+			case CMD_LINE_LINE_DISTANCE_PARALLEL: {
+				fprintf(stderr, "%p -> LDP(%p, %p) = (%fx + %fy + %f = 0)\n", &current->result, current->arg1, current->arg2, current->result.line.norm[0], current->result.line.norm[1], current->result.line.C);
+			}break;
+			case CMD_LINE_CIRCLE_CIRCLE_TANGENT: {
+				fprintf(stderr, "%p -> CCT(%p, %p) = (%fx + %fy + %f = 0)\n", &current->result, current->arg1, current->arg2, current->result.line.norm[0], current->result.line.norm[1], current->result.line.C);
+			}break;
+			case CMD_POINT_CIRCLE_LINE: {
+				fprintf(stderr, "%p -> PCL(%p, %p) = <%f, %f>\n", &current->result, current->arg1, current->arg2, current->result.point.pos[0], current->result.point.pos[1]);
+			}break;
+			case CMD_POINT_CIRCLE_CIRCLE: {
+				fprintf(stderr, "%p -> PCC(%p, %p) = <%f, %f>\n", &current->result, current->arg1, current->arg2, current->result.point.pos[0], current->result.point.pos[1]);
+			}break;
+			case CMD_POINT_LINE_LINE: {
+				fprintf(stderr, "%p -> PLL(%p, %p) = <%f, %f>\n", &current->result, current->arg1, current->arg2, current->result.point.pos[0], current->result.point.pos[1]);
+			}break;
+			case CMD_CIRCLE_CENTER_POINT: {
+				fprintf(stderr, "%p -> CCR(%p, %p) = ((x-%f)^2 + (y-%f)^2 = %f^2)\n", &current->result, current->arg1, current->arg2, current->result.circle.center[0], current->result.circle.center[1], current->result.circle.radius);
+			}break;
+			case CMD_IMPORT_POINT_LINE: {
+				fprintf(stderr, "%p -> IMP(%p, %p, %p, %p) = <N/A>\n", &current->result, current->arg1, current->arg2, current->attachp, current->attachl);
+			}break;
+			case CMD_IMPORT_LINE_LINE: {
+				// Deprecated
+			}break;
+			case CMD_MEASURE_POINT_LINE_DISTANCE: {
+				fprintf(stderr, "%p -> MPL(%p, %p) = %f\n", &current->result, current->arg1, current->arg2, current->result.value);
+			}break;
+			case CMD_MEASURE_LINE_LINE_ANGLE: {
+				fprintf(stderr, "%p -> MLL(%p, %p) = %f\n", &current->result, current->arg1, current->arg2, current->result.value);
+			}break;
+		}
 	}
 }
 
@@ -272,27 +333,49 @@ void place_points(struct drawing *drawing, double inputs[]) {
 				assert(current->d != NULL);
 				assert(current->attachp != NULL);
 				assert(current->attachl != NULL);
+				assert(current->attachp->type == ETYPE_POINT);
+				assert(current->attachl->type == ETYPE_LINE);
 
 				double theta;
 				// Align the two lines
 				theta = atan2(current->arg2->line.norm[1], current->arg2->line.norm[0]) - atan2(current->attachl->line.norm[1], current->attachl->line.norm[0]);
-				fprintf(stderr, "%f\n", theta / M_PI * 180.0);
 
 				mat3 transform;
 				glm_mat3_identity(transform);
 
-				glm_translate2d(transform, current->attachp->point.pos);
+				glm_translate2d(transform, current->arg1->point.pos);
 
 				glm_rotate2d(transform, theta);
 
 				{
 					vec2 negative_translate;
-					glm_vec2_negate_to(current->arg1->point.pos, negative_translate);
+					glm_vec2_negate_to(current->attachp->point.pos, negative_translate);
 					glm_translate2d(transform, negative_translate);
 				}
 
-				fprintf(stderr, "Assembly %p %p %p %f\n", current->d, current->d->first_command, current->d->last_command, theta);
+				fprintf(stderr, "Assembly %p %p %p %f %f %f\n", current->d, current->d->first_command, current->d->last_command, transform[2][0], transform[2][1], theta);
 				transform_part(current->d->first_command, current->d->last_command, transform);
+			}break;
+			case CMD_IMPORT_LINE_LINE: {
+				abort();
+			}break;
+			case CMD_MEASURE_POINT_LINE_DISTANCE: {
+				assert(current->arg1->type == ETYPE_POINT);
+				assert(current->arg2->type == ETYPE_LINE);
+				assert(current->result.type == ETYPE_VALUE);
+
+				double dot = glm_vec2_dot(current->arg2->line.norm, current->arg1->point.pos);
+				current->result.value = (dot + current->arg2->line.C) / glm_vec2_norm(current->arg2->line.norm);
+				fprintf(stderr, "Measured Distance %f\n", current->result.value);
+			}break;
+			case CMD_MEASURE_LINE_LINE_ANGLE: {
+				assert(current->arg1->type == ETYPE_LINE);
+				assert(current->arg2->type == ETYPE_LINE);
+				assert(current->result.type == ETYPE_VALUE);
+
+				double theta = atan2(current->arg1->line.norm[1], current->arg1->line.norm[0]) - atan2(current->arg2->line.norm[1], current->arg2->line.norm[0]);
+				current->result.value = theta;
+				fprintf(stderr, "Measured Angle %f\n", current->result.value);
 			}break;
 		}
 		// printf("%fx + %fy + %f = 0\n", cmd[2].line.norm[0], cmd[2].line.norm[1], cmd[2].line.C);
@@ -323,7 +406,7 @@ void place_points(struct drawing *drawing, double inputs[]) {
 			glm_translate2d(transform, negative_translate);
 		}
 
-		fprintf(stderr, "W %f %f\n", origin->result.point.pos[0], origin->result.point.pos[1]);
+		fprintf(stderr, "W %f %f %f\n", origin->result.point.pos[0], origin->result.point.pos[1], theta);
 		transform_part(outer_object, NULL, transform);
 	}
 }

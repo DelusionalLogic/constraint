@@ -21,6 +21,11 @@ enum operation {
 
 	// Handle assemblies
 	CMD_IMPORT_POINT_LINE,
+	CMD_IMPORT_LINE_LINE,
+
+	// Measure elements
+	CMD_MEASURE_POINT_LINE_DISTANCE,
+	CMD_MEASURE_LINE_LINE_ANGLE,
 };
 
 struct point {
@@ -87,6 +92,7 @@ struct drawing {
 
 struct element* insert_cmd(struct drawing *drawing, struct command cmd);
 void place_points(struct drawing *drawing, double inputs[]);
+void dump_program(struct drawing *drawing, double inputs[]);
 void free_drawing(struct drawing *drawing);
 
 bool circle_line_intersect(struct circle circle, struct line line, uint8_t root, struct point *point);

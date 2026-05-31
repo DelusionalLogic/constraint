@@ -17,6 +17,7 @@ void draw_from_constraints(struct constraints *c, struct topology *t, struct can
 	}
 
 	place_points(&drawing, params);
+	dump_program(&drawing, params);
 	free(params);
 
 	reconstruct_drawing(c, assemblies, &assemblies_num);
@@ -45,7 +46,6 @@ int main(int argc, char *argv[]) {
 	struct component l4 = {.type = COM_LINE};
 
 	add_constraint(&constraints, (struct constraint[]){
-		// Make a triangle
 		PP_DISTANCE(&p1, &p2, 10),
 		PP_DISTANCE(&p4, &p1, 20),
 

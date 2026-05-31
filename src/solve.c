@@ -63,15 +63,15 @@ static void add_frontier(struct component *component) {
 	component->fixed = true;
 }
 
-static void build_angle_point_line(struct drawing *drawing, struct constraint *constraints, size_t index_i, size_t index_j, struct component *local_i, struct component *local_j, struct component *oppo_i) {
-	assert(local_i->e != NULL);
-	assert(local_j->e != NULL);
-	assert(local_i->type == COM_LINE);
-	assert(local_j->type == COM_POINT);
+static void build_angle_point_line2(struct drawing *drawing, struct constraint *constraints, size_t index_i, size_t index_j, struct element *local_i, struct element *local_j, bool inverse, struct element **oppo_i) {
+	assert(local_i != NULL);
+	assert(local_j != NULL);
+	assert(local_i->type == ETYPE_LINE);
+	assert(local_j->type == ETYPE_POINT);
 	struct element *theta = insert_cmd(drawing, (struct command){
 		.op = CMD_VALUE_INPUT,
 		.index = index_i,
-		.dir = constraints[index_i].forward,
+		.dir = constraints[index_i].forward ^ inverse,
 		.result.type = ETYPE_VALUE,
 	});
 
@@ -80,7 +80,7 @@ static void build_angle_point_line(struct drawing *drawing, struct constraint *c
 			.op = CMD_OFFSET_INPUT,
 			.arg1 = theta,
 			.index = p->i,
-			.dir = p->direction,
+			.dir = p->direction ^ inverse,
 			.result.type = ETYPE_VALUE,
 		});
 	}
@@ -88,27 +88,31 @@ static void build_angle_point_line(struct drawing *drawing, struct constraint *c
 	struct element *d = insert_cmd(drawing, (struct command){
 		.op = CMD_VALUE_INPUT,
 		.index = index_j,
-		.dir = constraints[index_i].forward,
+		.dir = constraints[index_i].forward ^ inverse,
 		.result.type = ETYPE_VALUE,
 	});
 
 	struct element* l = insert_cmd(drawing, (struct command){
 		.op = CMD_LINE_POINT_LINE_ANGLE,
-		.hidden = !oppo_i->show_when_placed,
+		.hidden = false,
 		.result.type = ETYPE_LINE,
-		.arg1 = local_j->e,
-		.arg2 = local_i->e,
+		.arg1 = local_j,
+		.arg2 = local_i,
 		.arg3 = theta,
 	});
 	assert(l != NULL);
 
-	oppo_i->e = insert_cmd(drawing, (struct command){
+	*oppo_i = insert_cmd(drawing, (struct command){
 		.op = CMD_LINE_LINE_DISTANCE_PARALLEL,
-		.hidden = !oppo_i->show_when_placed,
+		.hidden = false,
 		.result.type = ETYPE_LINE,
 		.arg1 = l,
 		.arg2 = d,
 	});
+}
+
+static void build_angle_point_line(struct drawing *drawing, struct constraint *constraints, size_t index_i, size_t index_j, struct component *local_i, struct component *local_j, struct component *oppo_i) {
+	return build_angle_point_line2(drawing, constraints, index_i, index_j, local_i->e, local_j->e, false, &oppo_i->e);
 }
 
 struct solve_step {
@@ -549,7 +553,7 @@ static size_t build_triangles(struct constraints *constraints_in, struct compone
 
 							if(possibly_angle_c == NULL) continue;
 
-							printf("Assembly %p and %p, %d %d %s %s\n", ein_a, ein_b, f1_c, f2_c, constraint_type_name[not_angle_c->type], constraint_type_name[possibly_angle_c->type]);
+							fprintf(stderr, "Assembly %p and %p, %d %d %s %s\n", ein_a, ein_b, f1_c, f2_c, constraint_type_name[not_angle_c->type], constraint_type_name[possibly_angle_c->type]);
 
 							// We've fixed the subcomponents, so we have to fix
 							// the whole thing
@@ -751,6 +755,65 @@ static void draw_for_subassembly(struct constraint *constraints, size_t fix, str
 	});
 }
 
+void point_from_line_and_distance(struct drawing *drawing, struct constraint *constraints, size_t c1, size_t c2, struct element *line, struct element *point, int root, struct element **result) {
+	assert(line->type == ETYPE_LINE);
+	assert(point->type == ETYPE_POINT);
+
+	struct element *d1 = insert_cmd(drawing, (struct command){
+		.op = CMD_VALUE_INPUT,
+		.index = c1,
+		.dir = constraints[c1].forward,
+		.result.type = ETYPE_VALUE,
+	});
+	struct element *d2 = insert_cmd(drawing, (struct command){
+		.op = CMD_VALUE_INPUT,
+		.index = c2,
+		.dir = constraints[c2].forward,
+		.result.type = ETYPE_VALUE,
+	});
+
+	struct element *l = insert_cmd(drawing, (struct command){
+		.op = CMD_LINE_LINE_DISTANCE_PARALLEL,
+		.hidden = false,
+		.result.type = ETYPE_LINE,
+		.arg1 = line,
+		.arg2 = d1,
+	});
+
+	struct element *c = insert_cmd(drawing, (struct command){
+		.op = CMD_CIRCLE_CENTER_RADIUS,
+		.hidden = false,
+		.result.type = ETYPE_CIRCLE,
+		.arg1 = point,
+		.arg2 = d2,
+	});
+
+	*result = insert_cmd(drawing, (struct command){
+		.op = CMD_POINT_CIRCLE_LINE,
+		.hidden = false,
+		.root = root,
+		.result.type = ETYPE_POINT,
+		.arg1 = c,
+		.arg2 = l,
+	});
+}
+
+#define expand_constraint(NAME, IDX) \
+	struct constraint *NAME = &constraints[IDX]; \
+	struct component *NAME##_local; \
+	struct component *NAME##_oppo; \
+	do { \
+		if(IDX##_forward) { \
+			NAME##_local = constraints[IDX].c1; \
+			NAME##_oppo = constraints[IDX].c2; \
+		} else { \
+			NAME##_local = constraints[IDX].c2; \
+			NAME##_oppo = constraints[IDX].c1; \
+		} \
+	} while(0)
+	
+
+
 static void draw_for_double_subassembly(struct constraint *constraints, size_t fix, struct solve_step *step, struct drawing *drawing, struct subassembly *assembly) {
 	assert(step->assembly != NULL);
 	assert(step->assembly2 != NULL);
@@ -759,7 +822,123 @@ static void draw_for_double_subassembly(struct constraint *constraints, size_t f
 	// two constraints each, but are also mutually constrained by two
 	// constraints.
 
-	abort();
+	expand_constraint(a1, step->i);
+	expand_constraint(a2, step->j);
+
+	expand_constraint(b1, step->k);
+	expand_constraint(b2, step->x);
+
+	expand_constraint(c1, step->y);
+	expand_constraint(c2, step->z);
+
+	// Lets solve for a pretty static case first
+	assert(a1->type == CT_POINT_POINT_DISTANCE);
+	assert(a2->type == CT_POINT_LINE_DISTANCE);
+
+	assert(b1->type == CT_POINT_LINE_DISTANCE);
+	assert(b2->type == CT_LINE_LINE_ANGLE);
+
+	assert(c1->type == CT_POINT_LINE_DISTANCE);
+	assert(c2->type == CT_LINE_LINE_ANGLE);
+
+	// All the constraints form triangles, not necessarily required, but
+	// simpler
+	assert(a1_oppo == a2_oppo);
+	assert(a1_local != a2_local);
+	assert(b1_oppo == b2_oppo);
+	assert(b1_local != b2_local);
+	assert(c1_oppo == c2_oppo);
+	assert(c1_local != c2_local);
+
+	// The basic idea here is to create some new points for ax_oppo and bx_oppo
+	// which we can then use to place a circle or line
+	struct element *ax_oppo_locally = {};
+	point_from_line_and_distance(drawing, constraints, step->j, step->i, a2_local->e, a1_local->e, constraints[step->j].c2 == a2_local, &ax_oppo_locally);
+
+	struct element *bx_oppo_locally = {};
+	build_angle_point_line2(drawing, constraints, step->x, step->k, b2_local->e, b1_local->e, true, &bx_oppo_locally);
+
+	//cx's naming is strange, the two local points are in bx and the opposing
+	//point is in ax. We know that since ax was built before bx and had the two
+	//local elements been in ax, we would have included the point as well.
+	//
+	struct element *assembly1_distance = insert_cmd(drawing, (struct command){
+		.op = CMD_MEASURE_POINT_LINE_DISTANCE,
+		.hidden = true,
+		.result.type = ETYPE_VALUE,
+		.arg1 = a1_oppo->e,
+		.arg2 = c1_oppo->e,
+	});
+
+	// This line isn't really in our scope at this point. This is technically
+	// dubious, but it works due to the current implementation
+	struct element *cx_oppo_bx = {};
+	build_angle_point_line2(drawing, constraints, step->z, step->y, c2_local->e, c1_local->e, true, &cx_oppo_bx);
+
+	struct element *assembly2_angle = insert_cmd(drawing, (struct command){
+		.op = CMD_MEASURE_LINE_LINE_ANGLE,
+		.hidden = true,
+		.result.type = ETYPE_VALUE,
+		.arg1 = b1_oppo->e,
+		.arg2 = cx_oppo_bx,
+	});
+
+	struct element* cx_oppo_direction_locally;
+	{
+		struct element* l = insert_cmd(drawing, (struct command){
+			.op = CMD_LINE_POINT_LINE_ANGLE,
+			.hidden = false,
+			.result.type = ETYPE_LINE,
+			.arg1 = ax_oppo_locally,
+			.arg2 = bx_oppo_locally,
+			.arg3 = assembly2_angle,
+		});
+
+		cx_oppo_direction_locally = insert_cmd(drawing, (struct command){
+			.op = CMD_LINE_LINE_DISTANCE_PARALLEL,
+			.hidden = false,
+			.result.type = ETYPE_LINE,
+			.root = 1,
+			.arg1 = l,
+			.arg2 = assembly1_distance,
+		});
+	}
+
+	insert_cmd(drawing, (struct command){
+		.op = CMD_IMPORT_POINT_LINE,
+		.arg1 = ax_oppo_locally,
+		.arg2 = cx_oppo_direction_locally,
+		.d = step->assembly,
+		.attachp = a1_oppo->e,
+		.attachl = c1_oppo->e,
+	});
+
+	{
+		struct element *local_intersection = insert_cmd(drawing, (struct command){
+			.op = CMD_POINT_LINE_LINE,
+			.hidden = true,
+			.result.type = ETYPE_POINT,
+			.arg1 = bx_oppo_locally,
+			.arg2 = cx_oppo_direction_locally,
+		});
+
+		struct element *subassembly2_intersection = insert_cmd(drawing, (struct command){
+			.op = CMD_POINT_LINE_LINE,
+			.hidden = true,
+			.result.type = ETYPE_POINT,
+			.arg1 = b1_oppo->e,
+			.arg2 = cx_oppo_bx,
+		});
+
+		insert_cmd(drawing, (struct command){
+			.op = CMD_IMPORT_POINT_LINE,
+			.arg1 = local_intersection,
+			.arg2 = bx_oppo_locally,
+			.d = step->assembly2,
+			.attachp = subassembly2_intersection,
+			.attachl = b1_oppo->e,
+		});
+	}
 }
 
 static void draw_solution(struct constraint *constraints, size_t fix, struct solve_step* steps, size_t steps_num, struct drawing *drawing, struct subassembly *assembly) {
@@ -988,43 +1167,7 @@ static void draw_solution(struct constraint *constraints, size_t fix, struct sol
 			&& local_j->type == COM_POINT) {
 			assert(oppo_i->type == COM_POINT);
 
-			struct element *d1 = insert_cmd(drawing, (struct command){
-				.op = CMD_VALUE_INPUT,
-				.index = step->i,
-				.dir = constraints[step->i].forward,
-				.result.type = ETYPE_VALUE,
-			});
-			struct element *d2 = insert_cmd(drawing, (struct command){
-				.op = CMD_VALUE_INPUT,
-				.index = step->j,
-				.dir = constraints[step->j].forward,
-				.result.type = ETYPE_VALUE,
-			});
-
-			struct element *l = insert_cmd(drawing, (struct command){
-				.op = CMD_LINE_LINE_DISTANCE_PARALLEL,
-				.hidden = !shown,
-				.result.type = ETYPE_LINE,
-				.arg1 = local_i->e,
-				.arg2 = d1,
-			});
-
-			struct element *c = insert_cmd(drawing, (struct command){
-				.op = CMD_CIRCLE_CENTER_RADIUS,
-				.hidden = !shown,
-				.result.type = ETYPE_CIRCLE,
-				.arg1 = local_j->e,
-				.arg2 = d2,
-			});
-
-			oppo_i->e = insert_cmd(drawing, (struct command){
-				.op = CMD_POINT_CIRCLE_LINE,
-				.hidden = !shown,
-				.root = constraints[step->j].c2 == local_j,
-				.result.type = ETYPE_POINT,
-				.arg1 = c,
-				.arg2 = l,
-			});
+			point_from_line_and_distance(drawing, constraints, step->i, step->j, local_i->e, local_j->e, constraints[step->j].c2 == local_j, &oppo_i->e);
 		} else if(constraints[step->i].type == CT_POINT_POINT_DISTANCE
 			&& local_i->type == COM_POINT
 			&& constraints[step->j].type == CT_POINT_LINE_DISTANCE
@@ -1032,43 +1175,7 @@ static void draw_solution(struct constraint *constraints, size_t fix, struct sol
 			// @COPYPASTA: Taken from above but with params swapped
 			assert(oppo_i->type == COM_POINT);
 
-			struct element *d1 = insert_cmd(drawing, (struct command){
-				.op = CMD_VALUE_INPUT,
-				.index = step->i,
-				.dir = constraints[step->i].forward,
-				.result.type = ETYPE_VALUE,
-			});
-			struct element *d2 = insert_cmd(drawing, (struct command){
-				.op = CMD_VALUE_INPUT,
-				.index = step->j,
-				.dir = constraints[step->j].forward,
-				.result.type = ETYPE_VALUE,
-			});
-
-			struct element *l = insert_cmd(drawing, (struct command){
-				.op = CMD_LINE_LINE_DISTANCE_PARALLEL,
-				.hidden = !shown,
-				.result.type = ETYPE_LINE,
-				.arg1 = local_j->e,
-				.arg2 = d2,
-			});
-
-			struct element *c = insert_cmd(drawing, (struct command){
-				.op = CMD_CIRCLE_CENTER_RADIUS,
-				.hidden = !shown,
-				.result.type = ETYPE_CIRCLE,
-				.arg1 = local_i->e,
-				.arg2 = d1,
-			});
-
-			oppo_i->e = insert_cmd(drawing, (struct command){
-				.op = CMD_POINT_CIRCLE_LINE,
-				.hidden = !shown,
-				.root = constraints[step->j].c2 == local_i,
-				.result.type = ETYPE_POINT,
-				.arg1 = c,
-				.arg2 = l,
-			});
+			point_from_line_and_distance(drawing, constraints, step->j, step->i, local_j->e, local_i->e, constraints[step->j].c2 == local_i, &oppo_i->e);
 		} else {
 			CRASH("Unknown constraint combination %s and %s\n", constraint_type_name[constraints[step->i].type], constraint_type_name[constraints[step->j].type]);
 		}
@@ -1119,7 +1226,7 @@ bool solve_constraints(struct constraints *constraints, struct drawing *drawing,
 	size_t fix;
 	while(fix_first(constraints->elements, constraints->length, &fix)) {
 		// Build triangles on that root
-		assemblies[*assemblies_num].steps = malloc(sizeof(struct solve_step) * constraints->length);
+		assemblies[*assemblies_num].steps = calloc(1, sizeof(struct solve_step) * constraints->length);
 		assemblies[*assemblies_num].articulation = malloc(sizeof(struct component*) * constraints->length);
 		assemblies[*assemblies_num].articulation_position = malloc(sizeof(struct element*) * constraints->length);
 		assemblies[*assemblies_num].steps_num = build_triangles(constraints, components, dest_num, fix, *assemblies_num+1, &assemblies[*assemblies_num]);
